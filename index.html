@@ -15,10 +15,10 @@
   <meta property="og:description" content="Explore historic aerial photography of Cairns, Queensland (1952, 1962, 1965) overlaid on modern satellite imagery." />
   <meta name="twitter:card" content="summary" />
 
-  <!-- Leaflet CSS -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <!-- Leaflet CSS (vendored locally, see vendor/) -->
+  <link rel="stylesheet" href="vendor/leaflet.css" />
   <!-- Geocoder (address search) CSS -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder@2.4.0/dist/Control.Geocoder.css" />
+  <link rel="stylesheet" href="vendor/Control.Geocoder.css" />
 
   <style>
     html, body {
@@ -533,10 +533,10 @@
   <!-- Map Container -->
   <div id="map"></div>
 
-  <!-- Leaflet JS -->
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- Leaflet JS (vendored locally, see vendor/) -->
+  <script src="vendor/leaflet.js"></script>
   <!-- Geocoder (address search) -->
-  <script src="https://unpkg.com/leaflet-control-geocoder@2.4.0/dist/Control.Geocoder.min.js"></script>
+  <script src="vendor/Control.Geocoder.min.js"></script>
 
   <!-- Layer manifest (plain script so the page works from file:// too) -->
   <script src="layers.js"></script>
