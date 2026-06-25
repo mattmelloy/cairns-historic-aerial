@@ -67,6 +67,26 @@ window.MAP_CONFIG = {
         ]
       ],
       "attribution": "Cairns 1965 &mdash; Queensland Government QImagery"
+    },
+    {
+      "id": "cookhwy1965",
+      "name": "1965 Cook Hwy",
+      "year": 1965,
+      "url": "https://filedn.com/lnwtRrhS2tTy2K4EooXWFnR/tiles/historic/cookhwy65/{z}/{x}/{y}.webp",
+      "scheme": "xyz",
+      "minZoom": 11,
+      "maxNativeZoom": 20,
+      "bounds": [
+        [
+          -16.9464697,
+          145.6292725
+        ],
+        [
+          -16.7572079,
+          145.8270264
+        ]
+      ],
+      "attribution": "Cook Highway 1965 &mdash; Queensland Government QImagery"
     }
   ]
 };
