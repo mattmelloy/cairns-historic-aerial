@@ -1,0 +1,17 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor / local tooling
+.vscode/
+.idea/
+.claude/
+*.swp
+
+# Vercel
+.vercel/
+
+# Logs / env
+*.log
+.env
+.env.*

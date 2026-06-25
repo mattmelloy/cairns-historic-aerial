@@ -1,0 +1,547 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Cairns Historic Aerial Imagery</title>
+  <meta name="description" content="Explore historic aerial photography of Cairns, Queensland (1952, 1962, 1965) overlaid on modern satellite imagery. Compare, blend, and swipe between decades." />
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+
+  <!-- Open Graph / social sharing -->
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Cairns Historic Aerial Imagery" />
+  <meta property="og:description" content="Explore historic aerial photography of Cairns, Queensland (1952, 1962, 1965) overlaid on modern satellite imagery." />
+  <meta name="twitter:card" content="summary" />
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <!-- Geocoder (address search) CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder@2.4.0/dist/Control.Geocoder.css" />
+
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+
+    /* make the map fill the remaining space under the header */
+    #map {
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+
+    /* Header styling */
+    #site-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 44px;
+      line-height: 44px;
+      padding: 0 12px;
+      background: #0f172a;
+      color: #ffffff;
+      font-weight: 600;
+      font-family: "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+      z-index: 1000;
+    }
+
+    #header-acknowledgement {
+      font-size: 12px;
+      font-weight: 400;
+      color: #cbd5e1;
+    }
+
+    #header-acknowledgement a {
+      color: #e2e8f0;
+      text-decoration: none;
+    }
+
+    #header-acknowledgement a:hover {
+      text-decoration: underline;
+    }
+
+    /* 3D button in the header */
+    #view-3d-btn {
+      display: inline-block;
+      background: #06b6d4;
+      color: #062024;
+      border-radius: 6px;
+      padding: 6px 10px;
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 13px;
+      line-height: 1;
+      box-shadow: 0 1px 0 rgba(0,0,0,0.15);
+    }
+    #view-3d-btn:hover {
+      opacity: 0.95;
+    }
+
+    /* Splash screen styling */
+    #splash-screen {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0, 0, 0, 0.5);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 9999;
+    }
+
+    #splash-content {
+      background-color: rgba(15, 23, 42, 0.9);
+      color: white;
+      padding: 30px;
+      border-radius: 12px;
+      max-width: 600px;
+      width: 90%;
+      text-align: center;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+      font-family: "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+
+    #splash-content h2 {
+      margin-top: 0;
+      margin-bottom: 15px;
+      font-size: 1.8em;
+    }
+
+    #splash-content p {
+      margin-bottom: 10px;
+      line-height: 1.6;
+    }
+
+    #continue-btn {
+      background-color: #06b6d4;
+      color: #062024;
+      border: none;
+      border-radius: 6px;
+      padding: 12px 24px;
+      font-size: 1em;
+      font-weight: 700;
+      cursor: pointer;
+      margin-top: 20px;
+      box-shadow: 0 1px 0 rgba(0,0,0,0.15);
+      transition: background-color 0.2s;
+    }
+
+    #continue-btn:hover {
+      background-color: #0891b2;
+    }
+
+    #splash-screen.hidden {
+      display: none;
+    }
+
+    /* Loading indicator */
+    #loading-indicator {
+      position: fixed;
+      top: 60px;
+      right: 12px;
+      background: rgba(15, 23, 42, 0.9);
+      color: white;
+      padding: 10px 16px;
+      border-radius: 6px;
+      font-family: "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      font-size: 13px;
+      z-index: 1000;
+      display: none;
+      align-items: center;
+      gap: 10px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+
+    #loading-indicator.active {
+      display: flex;
+    }
+
+    .loading-spinner {
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: #06b6d4;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Custom Layer Control Styles */
+    .custom-layer-control {
+      background: rgba(255, 255, 255, 0.95);
+      padding: 12px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+      font-family: "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      font-size: 13px;
+      min-width: 180px;
+    }
+
+    /* Collapse toggle button */
+    .layer-control-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .layer-control-title {
+      font-weight: 700;
+      font-size: 12px;
+      color: #0f172a;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .layer-control-toggle {
+      background: #e2e8f0;
+      border: none;
+      border-radius: 4px;
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      padding: 0;
+      flex-shrink: 0;
+      margin-left: 8px;
+      transition: background 0.15s;
+    }
+
+    .layer-control-toggle:hover {
+      background: #cbd5e1;
+    }
+
+    .layer-control-toggle svg {
+      transition: transform 0.25s ease;
+      display: block;
+    }
+
+    /* Collapsed state */
+    .custom-layer-control.collapsed .layer-control-body {
+      display: none;
+    }
+
+    .custom-layer-control.collapsed .layer-control-toggle svg {
+      transform: rotate(180deg);
+    }
+
+    .custom-layer-control.collapsed {
+      padding-bottom: 8px;
+    }
+
+    /* On mobile, collapse by default */
+    @media (max-width: 600px) {
+      .custom-layer-control {
+        min-width: 160px;
+        font-size: 12px;
+      }
+    }
+
+    .layer-group {
+      margin-bottom: 12px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+
+    .layer-group:last-of-type {
+      border-bottom: none;
+      margin-bottom: 0;
+      padding-bottom: 0;
+    }
+
+    .group-title {
+      font-weight: 600;
+      color: #0f172a;
+      margin-bottom: 8px;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .layer-option {
+      display: flex;
+      align-items: center;
+      padding: 4px 0;
+      cursor: pointer;
+      color: #334155;
+      transition: color 0.15s;
+    }
+
+    .layer-option:hover {
+      color: #0f172a;
+    }
+
+    .layer-option input[type="radio"],
+    .layer-option input[type="checkbox"] {
+      margin-right: 8px;
+      cursor: pointer;
+    }
+
+    .layer-option.blend-mode {
+      font-weight: 500;
+      color: #059669;
+      padding: 8px;
+      background: #d1fae5;
+      border-radius: 4px;
+      margin-top: 4px;
+    }
+
+    .layer-option.blend-mode:hover {
+      background: #a7f3d0;
+    }
+
+    .blend-mode-group {
+      margin-top: 8px;
+    }
+
+    /* Opacity Slider Styles */
+    .opacity-slider-container {
+      background: rgba(255, 255, 255, 0.95);
+      padding: 12px 16px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+      font-family: "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      margin-bottom: 10px;
+      margin-left: 10px;
+    }
+
+    .opacity-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: #0f172a;
+      margin-bottom: 8px;
+    }
+
+    .opacity-slider {
+      width: 150px;
+      height: 6px;
+      border-radius: 3px;
+      background: #e2e8f0;
+      outline: none;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+
+    .opacity-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #06b6d4;
+      cursor: pointer;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+      transition: transform 0.15s;
+    }
+
+    .opacity-slider::-webkit-slider-thumb:hover {
+      transform: scale(1.1);
+    }
+
+    .opacity-slider::-moz-range-thumb {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #06b6d4;
+      cursor: pointer;
+      border: none;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+
+    .opacity-value {
+      font-size: 12px;
+      color: #64748b;
+      margin-top: 6px;
+      text-align: center;
+    }
+
+    /* Timeline control (bottom centre) */
+    .timeline-control {
+      position: absolute;
+      bottom: 28px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 1000;
+      background: rgba(15, 23, 42, 0.88);
+      border-radius: 10px;
+      padding: 8px 12px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.35);
+      font-family: "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      text-align: center;
+      max-width: calc(100% - 24px);
+    }
+
+    .timeline-label {
+      color: #cbd5e1;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .timeline-track {
+      display: flex;
+      gap: 6px;
+      justify-content: center;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .timeline-chip {
+      background: #1e293b;
+      color: #e2e8f0;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.15s, border-color 0.15s;
+    }
+
+    .timeline-chip:hover {
+      background: #334155;
+    }
+
+    .timeline-chip.active {
+      background: #06b6d4;
+      border-color: #06b6d4;
+      color: #062024;
+    }
+
+    @media (max-width: 600px) {
+      .timeline-control {
+        bottom: 36px;
+        padding: 6px 8px;
+      }
+      .timeline-chip {
+        padding: 5px 9px;
+        font-size: 12px;
+      }
+      /* keep the header on one line */
+      #site-header {
+        font-size: 14px;
+      }
+      #header-acknowledgement {
+        display: none;
+      }
+      /* lift the opacity slider clear of the timeline */
+      .opacity-slider-container {
+        margin-bottom: 96px;
+      }
+    }
+
+    /* Swipe compare divider */
+    .swipe-divider {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 50%;
+      width: 4px;
+      margin-left: -2px;
+      background: #ffffff;
+      box-shadow: 0 0 6px rgba(0,0,0,0.5);
+      z-index: 999;
+      display: none;
+      cursor: ew-resize;
+    }
+
+    .swipe-handle {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: #ffffff;
+      color: #0f172a;
+      font-size: 20px;
+      line-height: 40px;
+      text-align: center;
+      box-shadow: 0 1px 6px rgba(0,0,0,0.5);
+      cursor: ew-resize;
+      user-select: none;
+      touch-action: none;
+    }
+
+    /* Adjust Leaflet control positioning */
+    .leaflet-top.leaflet-right {
+      margin-top: 8px;
+      margin-right: 8px;
+    }
+
+    .leaflet-control-attribution {
+      font-size: 11px;
+      max-width: 400px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+  </style>
+</head>
+<body>
+  <!-- Loading Indicator -->
+  <div id="loading-indicator">
+    <div class="loading-spinner"></div>
+    <span id="tile-counter"></span>
+  </div>
+
+  <!-- Splash Screen -->
+  <div id="splash-screen">
+    <div id="splash-content">
+      <h2>Disclaimer</h2>
+      <p>The aerial imagery displayed on this website may not be precisely aligned or positioned. Variations can occur due to the age of the source imagery, differences in capture dates, and the accuracy of the original coordinate data. Users should treat the imagery as indicative only and not rely on it for precise measurements or navigation.</p>
+      <h2>Imagery Acknowledgment</h2>
+      <p>This website uses aerial imagery sourced from the Queensland Government's QImagery program. Data is provided under the terms and conditions of the Queensland Government's Online Services Terms and Conditions.</p>
+      <button id="continue-btn">Continue</button>
+    </div>
+  </div>
+
+  <!-- Header -->
+  <header id="site-header">
+    <span>Cairns Historic Aerial Imagery</span>
+    <span id="header-acknowledgement">
+      Aerial imagery provided by Queensland Government <a href="https://qimagery.information.qld.gov.au" target="_blank" rel="noopener noreferrer">QImagery</a>
+    </span>
+  </header>
+  
+  <!-- Map Container -->
+  <div id="map"></div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- Geocoder (address search) -->
+  <script src="https://unpkg.com/leaflet-control-geocoder@2.4.0/dist/Control.Geocoder.min.js"></script>
+
+  <!-- Layer manifest (plain script so the page works from file:// too) -->
+  <script src="layers.js"></script>
+
+  <!-- Main script -->
+  <script src="main.js"></script>
+</body>
+</html>
