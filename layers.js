@@ -52,21 +52,22 @@ window.MAP_CONFIG = {
       "id": "cairns65",
       "name": "Cairns 1965 Hi-Res",
       "year": 1965,
-      "url": "https://filedn.com/lnwtRrhS2tTy2K4EooXWFnR/tiles/historic/cairns65/{z}/{x}/{y}.png",
-      "scheme": "tms",
+      "url": "https://filedn.com/lnwtRrhS2tTy2K4EooXWFnR/tiles/historic/CairnsProject1965/{z}/{x}/{y}.webp",
+      "scheme": "xyz",
       "minZoom": 10,
-      "maxNativeZoom": 20,
+      "maxNativeZoom": 19,
+      "maxZoom": 21,
       "bounds": [
         [
-          -16.94169617690731,
-          145.6614068270771
+          -17.0237,
+          145.5906
         ],
         [
-          -16.76180493336028,
-          145.81124445216753
+          -16.7432,
+          145.8827
         ]
       ],
-      "attribution": "Cairns 1965 &mdash; Queensland Government QImagery"
+      "attribution": "Cairns 1965 &mdash; unified GCP-aligned mosaic (QAP1656 + QAP1774 + QAP1655/1777-023), tone-matched &mdash; Queensland Government QImagery"
     },
     {
       "id": "cookhwy1965",

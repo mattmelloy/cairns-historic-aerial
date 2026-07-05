@@ -124,11 +124,25 @@ const app = {
   opacity: 0.7,
   showFootprint: false,
   footprintRect: null,
-  swipe: { position: 0.5, divider: null, dragging: false }
+  swipe: { position: 0.5, divider: null, dragging: false },
+  gcpPicker: false,        // click-to-copy coordinate picker (for GCP collection)
+  gcpMarker: null,
+  brightness: 1,           // CSS filter on the active historic layer
+  contrast: 1
 };
 
 function currentHistoricLayer() {
   return app.currentLayerId ? app.historicLayers[app.currentLayerId] : null;
+}
+
+// Apply brightness/contrast as a CSS filter on the active historic layer's tile
+// container. Purely client-side (no re-tiling); lets the user rescue washed-out or
+// low-contrast areas per-view.
+function applyImageAdjust() {
+  const layer = currentHistoricLayer();
+  if (!layer) return;
+  const c = layer.getContainer();
+  if (c) c.style.filter = `brightness(${app.brightness}) contrast(${app.contrast})`;
 }
 
 function updateHash() {
@@ -230,7 +244,16 @@ function applyMode() {
   }
   const sliderContainer = document.querySelector('.opacity-slider-container');
   if (sliderContainer) {
-    sliderContainer.style.display = (layer && app.mode === 'blend') ? 'block' : 'none';
+    // show whenever a historic layer is active (brightness/contrast apply in every
+    // mode); the opacity row itself only matters in blend mode
+    sliderContainer.style.display = layer ? 'block' : 'none';
+    const opRow = document.getElementById('opacity-slider');
+    const opLbl = sliderContainer.querySelector('.opacity-label');
+    const opVal = document.getElementById('opacity-value');
+    const showOp = app.mode === 'blend' ? '' : 'none';
+    if (opRow) opRow.style.display = showOp;
+    if (opLbl) opLbl.style.display = showOp;
+    if (opVal) opVal.style.display = showOp;
   }
   updateSwipe();
 }
@@ -281,6 +304,7 @@ function selectHistoricLayer(layerId) {
 
   updateFootprint();
   applyMode();
+  applyImageAdjust();   // re-apply brightness/contrast to the newly-active layer
   updateAttribution();
   updateHash();
 }
@@ -389,6 +413,10 @@ function createLayerControl() {
             <input type="checkbox" id="footprint-toggle">
             <span>Show coverage outline</span>
           </label>
+          <label class="layer-option">
+            <input type="checkbox" id="gcp-toggle">
+            <span>Coordinate picker (click&nbsp;&rarr;&nbsp;copy)</span>
+          </label>
         </div>
       </div>
     `;
@@ -432,12 +460,107 @@ function createLayerControl() {
       updateFootprint();
     });
 
+    div.querySelector('#gcp-toggle').addEventListener('change', e => {
+      setGcpPicker(e.target.checked);
+    });
+
     L.DomEvent.disableClickPropagation(div);
     L.DomEvent.disableScrollPropagation(div);
     return div;
   };
 
   return control;
+}
+
+// ---------------------------------------------------------------------------
+// Coordinate picker  (click the map to read + copy "lat,lng" for GCP work)
+// ---------------------------------------------------------------------------
+function createCoordReadout() {
+  const control = L.control({ position: 'topleft' });
+  control.onAdd = function () {
+    const div = L.DomUtil.create('div', 'gcp-readout');
+    div.id = 'gcp-readout';
+    div.style.cssText =
+      'display:none;background:rgba(15,23,42,.92);color:#e2e8f0;font:13px/1.3 ' +
+      'system-ui,sans-serif;padding:8px 10px;border-radius:8px;box-shadow:0 2px 8px ' +
+      'rgba(0,0,0,.35);min-width:190px';
+    div.innerHTML =
+      '<div style="font-size:11px;text-transform:uppercase;letter-spacing:.04em;' +
+      'color:#94a3b8;margin-bottom:4px">Coordinate picker</div>' +
+      '<div id="gcp-readout-value" style="font-variant-numeric:tabular-nums;' +
+      'font-weight:600;margin-bottom:6px">click the map…</div>' +
+      '<button id="gcp-readout-copy" type="button" style="font:12px system-ui;' +
+      'cursor:pointer;border:0;border-radius:6px;padding:4px 10px;background:#0ea5e9;' +
+      'color:#fff">Copy</button>' +
+      '<span id="gcp-readout-hint" style="margin-left:8px;color:#94a3b8;font-size:11px">' +
+      'drag pin to nudge</span>';
+    L.DomEvent.disableClickPropagation(div);
+    L.DomEvent.disableScrollPropagation(div);
+    return div;
+  };
+  return control;
+}
+
+function copyToClipboard(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(text).then(() => true, () => false);
+  }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return Promise.resolve(ok);
+  } catch (e) { return Promise.resolve(false); }
+}
+
+function showGcpCoord(latlng, copy) {
+  const lat = latlng.lat.toFixed(5);
+  const lng = latlng.lng.toFixed(5);
+  const text = `${lat},${lng}`;
+  const valEl = document.getElementById('gcp-readout-value');
+  const hintEl = document.getElementById('gcp-readout-hint');
+  if (valEl) valEl.textContent = text;
+  if (copy) {
+    copyToClipboard(text).then(ok => {
+      if (hintEl) hintEl.textContent = ok ? 'copied ✓' : 'copy failed – select manually';
+    });
+  } else if (hintEl) {
+    hintEl.textContent = 'drag pin to nudge';
+  }
+  return text;
+}
+
+function setGcpPicker(on) {
+  app.gcpPicker = on;
+  app.map.getContainer().style.cursor = on ? 'crosshair' : '';
+  const ro = document.getElementById('gcp-readout');
+  if (ro) ro.style.display = on ? 'block' : 'none';
+  if (!on && app.gcpMarker) {
+    app.map.removeLayer(app.gcpMarker);
+    app.gcpMarker = null;
+  }
+}
+
+function setupGcpPicker() {
+  app.map.on('click', e => {
+    if (!app.gcpPicker) return;
+    if (!app.gcpMarker) {
+      app.gcpMarker = L.marker(e.latlng, { draggable: true }).addTo(app.map);
+      app.gcpMarker.on('dragend', () => showGcpCoord(app.gcpMarker.getLatLng(), true));
+    } else {
+      app.gcpMarker.setLatLng(e.latlng);
+    }
+    showGcpCoord(e.latlng, true);
+  });
+
+  const copyBtn = document.getElementById('gcp-readout-copy');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', () => {
+      if (app.gcpMarker) showGcpCoord(app.gcpMarker.getLatLng(), true);
+    });
+  }
 }
 
 function createOpacitySlider() {
@@ -449,6 +572,11 @@ function createOpacitySlider() {
       <div class="opacity-label">Historic Overlay Opacity</div>
       <input type="range" id="opacity-slider" min="0" max="100" value="${Math.round(app.opacity * 100)}" class="opacity-slider">
       <div class="opacity-value" id="opacity-value">${Math.round(app.opacity * 100)}%</div>
+      <div class="opacity-label" style="margin-top:8px">Brightness</div>
+      <input type="range" id="brightness-slider" min="50" max="150" value="${Math.round(app.brightness * 100)}" class="opacity-slider">
+      <div class="opacity-label" style="margin-top:6px">Contrast</div>
+      <input type="range" id="contrast-slider" min="50" max="200" value="${Math.round(app.contrast * 100)}" class="opacity-slider">
+      <div style="text-align:center;margin-top:4px"><button id="bc-reset" style="font:11px system-ui;padding:3px 10px;border:1px solid #99a;border-radius:5px;background:#f6f7ff;cursor:pointer">Reset B/C</button></div>
     `;
     div.style.display = 'none';
     L.DomEvent.disableClickPropagation(div);
@@ -512,8 +640,10 @@ async function init() {
   L.control.scale().addTo(app.map);
   createLayerControl().addTo(app.map);
   createOpacitySlider().addTo(app.map);
+  createCoordReadout().addTo(app.map);
   createTimeline(manifest);
   createSwipeDivider();
+  setupGcpPicker();
 
   // Address search (Nominatim), biased towards the map area
   if (L.Control.geocoder) {
@@ -538,6 +668,19 @@ async function init() {
       if (layer && app.mode === 'blend') layer.setOpacity(app.opacity);
     });
   }
+
+  // Brightness / contrast sliders (CSS filter on the active historic layer)
+  const bSlider = document.getElementById('brightness-slider');
+  if (bSlider) bSlider.addEventListener('input', e => { app.brightness = e.target.value / 100; applyImageAdjust(); });
+  const cSlider = document.getElementById('contrast-slider');
+  if (cSlider) cSlider.addEventListener('input', e => { app.contrast = e.target.value / 100; applyImageAdjust(); });
+  const bcReset = document.getElementById('bc-reset');
+  if (bcReset) bcReset.addEventListener('click', () => {
+    app.brightness = 1; app.contrast = 1;
+    if (bSlider) bSlider.value = 100;
+    if (cSlider) cSlider.value = 100;
+    applyImageAdjust();
+  });
 
   app.map.on('moveend zoomend', updateHash);
 
