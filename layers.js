@@ -73,18 +73,18 @@ window.MAP_CONFIG = {
       "id": "cookhwy1965",
       "name": "1965 Cook Hwy",
       "year": 1965,
-      "url": "https://filedn.com/lnwtRrhS2tTy2K4EooXWFnR/tiles/historic/cookhwy65/{z}/{x}/{y}.webp",
+      "url": "https://filedn.com/lnwtRrhS2tTy2K4EooXWFnR/tiles/historic/cookhighway1965/{z}/{x}/{y}.webp",
       "scheme": "xyz",
       "minZoom": 11,
       "maxNativeZoom": 20,
       "bounds": [
         [
-          -16.9464697,
-          145.6292725
+          -16.9400661,
+          145.6605731
         ],
         [
-          -16.7572079,
-          145.8270264
+          -16.7661997,
+          145.7896192
         ]
       ],
       "attribution": "Cook Highway 1965 &mdash; Queensland Government QImagery"

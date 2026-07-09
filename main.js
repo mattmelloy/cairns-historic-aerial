@@ -73,6 +73,17 @@ function createTileLayer(pathTemplate, opts = {}) {
   return layer;
 }
 
+function historicLayerOptions(def) {
+  return {
+    attribution: def.attribution,
+    minZoom: def.minZoom != null ? def.minZoom : 10,
+    maxNativeZoom: def.maxNativeZoom,
+    maxZoom: MAP_MAX_ZOOM,
+    bounds: L.latLngBounds(def.bounds),
+    tms: def.scheme === 'tms'
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Base layers
 // ---------------------------------------------------------------------------
@@ -92,7 +103,7 @@ const BASE_LAYER_DEFS = [
 ];
 
 // ---------------------------------------------------------------------------
-// URL hash  (#zoom/lat/lng/layerId/baseId)
+// URL hash  (#zoom/lat/lng/layerId/baseId[/quadrants/layerId,...])
 // ---------------------------------------------------------------------------
 function parseHash() {
   const parts = window.location.hash.replace(/^#\/?/, '').split('/');
@@ -105,7 +116,10 @@ function parseHash() {
     zoom,
     center: [lat, lng],
     layerId: parts[3] && parts[3] !== 'none' ? parts[3] : null,
-    baseId: parts[4] || null
+    baseId: parts[4] || null,
+    quadrantLayerIds: parts[5] === 'quadrants' && parts[6]
+      ? parts[6].split(',').filter(Boolean)
+      : null
   };
 }
 
@@ -120,7 +134,7 @@ const app = {
   layerDefs: {},           // id -> manifest entry
   currentBaseId: 'esri',
   currentLayerId: null,
-  mode: 'overlay',         // 'overlay' | 'blend' | 'compare'
+  mode: 'overlay',         // 'overlay' | 'blend' | 'compare' | 'quadrants'
   opacity: 0.7,
   showFootprint: false,
   footprintRect: null,
@@ -128,7 +142,9 @@ const app = {
   gcpPicker: false,        // click-to-copy coordinate picker (for GCP collection)
   gcpMarker: null,
   brightness: 1,           // CSS filter on the active historic layer
-  contrast: 1
+  contrast: 1,
+  quadrants: null,
+  quadrantLayerIds: null
 };
 
 function currentHistoricLayer() {
@@ -147,9 +163,12 @@ function applyImageAdjust() {
 
 function updateHash() {
   if (!app.map) return;
-  const c = app.map.getCenter();
-  const z = app.map.getZoom();
-  const hash = `#${z}/${c.lat.toFixed(5)}/${c.lng.toFixed(5)}/${app.currentLayerId || 'none'}/${app.currentBaseId || 'none'}`;
+  const activeMap = app.quadrants ? app.quadrants.panes[0].map : app.map;
+  const c = activeMap.getCenter();
+  const z = activeMap.getZoom();
+  const base = `#${z}/${c.lat.toFixed(5)}/${c.lng.toFixed(5)}/${app.currentLayerId || 'none'}/${app.currentBaseId || 'none'}`;
+  const selected = app.quadrants ? app.quadrants.panes.map(pane => pane.layerId) : [];
+  const hash = selected.length === 4 ? `${base}/quadrants/${selected.join(',')}` : base;
   history.replaceState(null, '', hash);
 }
 
@@ -236,6 +255,10 @@ function updateSwipe() {
 // Layer / mode switching
 // ---------------------------------------------------------------------------
 function applyMode() {
+  const isQuadrants = app.mode === 'quadrants';
+  if (isQuadrants) enterQuadrantMode();
+  else exitQuadrantMode();
+
   const layer = currentHistoricLayer();
   if (layer) {
     layer.setOpacity(app.mode === 'blend' ? app.opacity : 1);
@@ -246,7 +269,7 @@ function applyMode() {
   if (sliderContainer) {
     // show whenever a historic layer is active (brightness/contrast apply in every
     // mode); the opacity row itself only matters in blend mode
-    sliderContainer.style.display = layer ? 'block' : 'none';
+    sliderContainer.style.display = layer && !isQuadrants ? 'block' : 'none';
     const opRow = document.getElementById('opacity-slider');
     const opLbl = sliderContainer.querySelector('.opacity-label');
     const opVal = document.getElementById('opacity-value');
@@ -256,6 +279,165 @@ function applyMode() {
     if (opVal) opVal.style.display = showOp;
   }
   updateSwipe();
+}
+
+// ---------------------------------------------------------------------------
+// Four-panel historic comparison
+// ---------------------------------------------------------------------------
+function updatePaneNotices(pane) {
+  const def = app.layerDefs[pane.layerId];
+  const covered = def && L.latLngBounds(def.bounds).contains(pane.map.getCenter());
+  pane.coverageNotice.hidden = Boolean(covered);
+  const unavailable = covered && pane.tileState.settled &&
+    pane.tileState.loaded === 0 && pane.tileState.errors > 0;
+  pane.availabilityNotice.hidden = !unavailable;
+}
+
+function updateQuadrantCoverage() {
+  if (!app.quadrants) return;
+  app.quadrants.panes.forEach(updatePaneNotices);
+}
+
+function resetPaneTileState(pane) {
+  pane.tileState = { loaded: 0, errors: 0, settled: false };
+  updatePaneNotices(pane);
+}
+
+function setQuadrantLayer(pane, layerId) {
+  const def = app.layerDefs[layerId];
+  if (!def) return;
+  if (pane.layer) pane.map.removeLayer(pane.layer);
+  pane.layerId = layerId;
+  resetPaneTileState(pane);
+  pane.layer = createTileLayer(def.url, historicLayerOptions(def));
+  pane.layer.on('loading', () => resetPaneTileState(pane));
+  pane.layer.on('tileload', () => { pane.tileState.loaded++; });
+  pane.layer.on('tileerror', () => { pane.tileState.errors++; });
+  pane.layer.on('load', () => {
+    pane.tileState.settled = true;
+    updatePaneNotices(pane);
+  });
+  pane.layer.addTo(pane.map);
+  pane.select.value = layerId;
+  updatePaneNotices(pane);
+  if (app.quadrants) {
+    app.quadrantLayerIds = app.quadrants.panes.map(item => item.layerId);
+    updateHash();
+  }
+}
+
+function syncQuadrantMaps(sourceMap) {
+  if (!app.quadrants || app.quadrants.syncing) return;
+  app.quadrants.syncing = true;
+  const center = sourceMap.getCenter();
+  const zoom = sourceMap.getZoom();
+  app.quadrants.panes.forEach(pane => {
+    if (pane.map !== sourceMap) pane.map.setView(center, zoom, { animate: false });
+  });
+  app.quadrants.syncing = false;
+  updateQuadrantCoverage();
+  updateHash();
+}
+
+function exitQuadrantMode() {
+  if (!app.quadrants) return;
+  const { container, panes, resizeHandler } = app.quadrants;
+  panes.forEach(pane => pane.map.remove());
+  window.removeEventListener('resize', resizeHandler);
+  container.remove();
+  app.quadrants = null;
+  app.map.invalidateSize();
+}
+
+function enterQuadrantMode() {
+  if (app.quadrants || !app.map || !app.manifest) return;
+
+  const currentView = { center: app.map.getCenter(), zoom: app.map.getZoom() };
+  const defs = app.manifest.layers;
+  const requestedIds = (app.quadrantLayerIds || []).filter(id => app.layerDefs[id]);
+  const selectedIds = [...requestedIds, app.currentLayerId, ...defs.map(def => def.id)]
+    .filter((id, index, ids) => id && ids.indexOf(id) === index)
+    .slice(0, 4);
+
+  const container = document.createElement('section');
+  container.className = 'quadrant-view';
+  container.setAttribute('aria-label', 'Four-panel historic imagery comparison');
+  container.innerHTML = `
+    <div class="quadrant-toolbar">
+      <span>Four-panel comparison</span>
+      <button type="button" class="quadrant-exit" title="Return to single-map view" aria-label="Return to single-map view">&times;</button>
+    </div>
+    <div class="quadrant-grid"></div>
+  `;
+  app.map.getContainer().appendChild(container);
+
+  const grid = container.querySelector('.quadrant-grid');
+  const panes = selectedIds.map((layerId, index) => {
+    const paneEl = document.createElement('article');
+    paneEl.className = 'quadrant-pane';
+    paneEl.innerHTML = `
+      <div class="quadrant-pane-map" aria-label="Historic imagery pane ${index + 1}"></div>
+      <label class="quadrant-select-wrap">
+        <span class="sr-only">Historic imagery for pane ${index + 1}</span>
+        <select class="quadrant-select">
+          ${defs.map(def => `<option value="${def.id}">${def.name}</option>`).join('')}
+        </select>
+      </label>
+      <div class="quadrant-coverage-notice" hidden>
+        <strong>No imagery at this location</strong>
+        <span>This survey does not cover the map centre.</span>
+      </div>
+      <div class="quadrant-availability-notice" hidden>
+        <strong>Historic tiles unavailable</strong>
+        <span>The imagery could not be loaded. Try again shortly.</span>
+      </div>
+    `;
+    grid.appendChild(paneEl);
+
+    const map = L.map(paneEl.querySelector('.quadrant-pane-map'), {
+      center: currentView.center,
+      zoom: currentView.zoom,
+      minZoom: 8,
+      maxZoom: MAP_MAX_ZOOM,
+      zoomControl: false,
+      attributionControl: false,
+      preferCanvas: true
+    });
+    L.control.zoom({ position: 'bottomleft' }).addTo(map);
+    const pane = {
+      map,
+      layerId,
+      layer: null,
+      select: paneEl.querySelector('.quadrant-select'),
+      coverageNotice: paneEl.querySelector('.quadrant-coverage-notice'),
+      availabilityNotice: paneEl.querySelector('.quadrant-availability-notice'),
+      tileState: { loaded: 0, errors: 0, settled: false }
+    };
+    pane.select.addEventListener('change', event => setQuadrantLayer(pane, event.target.value));
+    L.DomEvent.disableClickPropagation(paneEl.querySelector('.quadrant-select-wrap'));
+    map.on('moveend zoomend', () => syncQuadrantMaps(map));
+    setQuadrantLayer(pane, layerId);
+    return pane;
+  });
+
+  const resizeHandler = () => {
+    if (!app.quadrants) return;
+    app.quadrants.panes.forEach(pane => pane.map.invalidateSize());
+  };
+  app.quadrants = { container, panes, syncing: false, resizeHandler };
+  app.quadrantLayerIds = panes.map(pane => pane.layerId);
+  window.addEventListener('resize', resizeHandler);
+
+  container.querySelector('.quadrant-exit').addEventListener('click', () => {
+    app.mode = 'overlay';
+    const overlayRadio = document.querySelector('input[name="view-mode"][value="overlay"]');
+    if (overlayRadio) overlayRadio.checked = true;
+    applyMode();
+    updateHash();
+  });
+  resizeHandler();
+  updateQuadrantCoverage();
+  updateHash();
 }
 
 function updateFootprint() {
@@ -406,6 +588,10 @@ function createLayerControl() {
             <input type="radio" name="view-mode" value="compare">
             <span>Compare (swipe)</span>
           </label>
+          <label class="layer-option">
+            <input type="radio" name="view-mode" value="quadrants">
+            <span>Four-panel comparison</span>
+          </label>
         </div>
 
         <div class="layer-group">
@@ -452,6 +638,7 @@ function createLayerControl() {
       input.addEventListener('change', e => {
         app.mode = e.target.value;
         applyMode();
+        updateHash();
       });
     });
 
@@ -569,16 +756,28 @@ function createOpacitySlider() {
   control.onAdd = function () {
     const div = L.DomUtil.create('div', 'opacity-slider-container');
     div.innerHTML = `
-      <div class="opacity-label">Historic Overlay Opacity</div>
-      <input type="range" id="opacity-slider" min="0" max="100" value="${Math.round(app.opacity * 100)}" class="opacity-slider">
-      <div class="opacity-value" id="opacity-value">${Math.round(app.opacity * 100)}%</div>
-      <div class="opacity-label" style="margin-top:8px">Brightness</div>
-      <input type="range" id="brightness-slider" min="50" max="150" value="${Math.round(app.brightness * 100)}" class="opacity-slider">
-      <div class="opacity-label" style="margin-top:6px">Contrast</div>
-      <input type="range" id="contrast-slider" min="50" max="200" value="${Math.round(app.contrast * 100)}" class="opacity-slider">
-      <div style="text-align:center;margin-top:4px"><button id="bc-reset" style="font:11px system-ui;padding:3px 10px;border:1px solid #99a;border-radius:5px;background:#f6f7ff;cursor:pointer">Reset B/C</button></div>
+      <button type="button" id="opacity-toggle" class="opacity-toggle" aria-label="Open image enhancement controls" aria-expanded="false"><span>Image</span><span>Enhancement</span></button>
+      <div class="opacity-controls">
+        <div class="opacity-label">Historic Overlay Opacity</div>
+        <input type="range" id="opacity-slider" min="0" max="100" value="${Math.round(app.opacity * 100)}" class="opacity-slider">
+        <div class="opacity-value" id="opacity-value">${Math.round(app.opacity * 100)}%</div>
+        <div class="opacity-label" style="margin-top:8px">Brightness</div>
+        <input type="range" id="brightness-slider" min="50" max="150" value="${Math.round(app.brightness * 100)}" class="opacity-slider">
+        <div class="opacity-label" style="margin-top:6px">Contrast</div>
+        <input type="range" id="contrast-slider" min="50" max="200" value="${Math.round(app.contrast * 100)}" class="opacity-slider">
+        <div style="text-align:center;margin-top:4px"><button id="bc-reset" style="font:11px system-ui;padding:3px 10px;border:1px solid #99a;border-radius:5px;background:#f6f7ff;cursor:pointer">Reset B/C</button></div>
+      </div>
     `;
     div.style.display = 'none';
+    div.classList.add('collapsed');
+    const toggle = div.querySelector('#opacity-toggle');
+    toggle.addEventListener('click', () => {
+      const collapsed = div.classList.toggle('collapsed');
+      toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      toggle.setAttribute('aria-label', collapsed
+        ? 'Open image enhancement controls'
+        : 'Minimize image enhancement controls');
+    });
     L.DomEvent.disableClickPropagation(div);
     L.DomEvent.disableScrollPropagation(div);
     return div;
@@ -610,14 +809,7 @@ async function init() {
 
   manifest.layers.forEach(def => {
     app.layerDefs[def.id] = def;
-    app.historicLayers[def.id] = createTileLayer(def.url, {
-      attribution: def.attribution,
-      minZoom: def.minZoom != null ? def.minZoom : 10,
-      maxNativeZoom: def.maxNativeZoom,
-      maxZoom: MAP_MAX_ZOOM,
-      bounds: L.latLngBounds(def.bounds),
-      tms: def.scheme === 'tms'
-    });
+    app.historicLayers[def.id] = createTileLayer(def.url, historicLayerOptions(def));
   });
 
   // Restore state from the URL hash if present
@@ -691,6 +883,14 @@ async function init() {
     selectHistoricLayer(hashState.layerId);
   } else if (!hashState) {
     updateHash();
+  }
+
+  if (hashState && hashState.quadrantLayerIds) {
+    app.quadrantLayerIds = hashState.quadrantLayerIds;
+    app.mode = 'quadrants';
+    const quadrantRadio = document.querySelector('input[name="view-mode"][value="quadrants"]');
+    if (quadrantRadio) quadrantRadio.checked = true;
+    applyMode();
   }
 
   // Expose for debugging
