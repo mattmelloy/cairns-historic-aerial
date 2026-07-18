@@ -31,6 +31,7 @@ window.MAP_CONFIG = {
     {
       "id": "cairnsbeaches1962",
       "name": "Cairns Beaches 1962",
+      "timelineLabel": "1962 Beaches",
       "year": 1962,
       "url": "https://filedn.com/lnwtRrhS2tTy2K4EooXWFnR/tiles/historic/cairnsbeaches1962/{z}/{x}/{y}.png",
       "scheme": "tms",
@@ -51,6 +52,7 @@ window.MAP_CONFIG = {
     {
       "id": "cairns65",
       "name": "Cairns 1965 Hi-Res",
+      "timelineLabel": "1965",
       "year": 1965,
       "url": "https://filedn.com/lnwtRrhS2tTy2K4EooXWFnR/tiles/historic/CairnsProject1965/{z}/{x}/{y}.webp",
       "scheme": "xyz",
@@ -88,6 +90,26 @@ window.MAP_CONFIG = {
         ]
       ],
       "attribution": "Cook Highway 1965 &mdash; Queensland Government QImagery"
+    },
+    {
+      "id": "cairns1972",
+      "name": "Cairns 1972",
+      "year": 1972,
+      "url": "https://filedn.com/lnwtRrhS2tTy2K4EooXWFnR/tiles/historic/Cairns1972/{z}/{x}/{y}.webp",
+      "scheme": "xyz",
+      "minZoom": 10,
+      "maxNativeZoom": 19,
+      "bounds": [
+        [
+          -17.02921196640138,
+          145.6244659423828
+        ],
+        [
+          -16.705916989193067,
+          145.8489990234375
+        ]
+      ],
+      "attribution": "Cairns 1972 &mdash; Queensland Government QImagery"
     }
   ]
 };

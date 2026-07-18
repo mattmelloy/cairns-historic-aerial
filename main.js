@@ -1,5 +1,5 @@
 // main.js - Cairns Historic Aerial Imagery
-// Layers are defined in layers.json - the site builds itself from that manifest.
+// Layers are defined in layers.js - the site builds itself from that manifest.
 // Features: year timeline, swipe compare, opacity blend, shareable URL hash,
 // address search, coverage outlines.
 
@@ -13,23 +13,27 @@ const MAP_MAX_ZOOM = 21;
 // ---------------------------------------------------------------------------
 // Tile loading indicator
 // ---------------------------------------------------------------------------
-const tileLoadState = { loading: 0, loaded: 0, errors: 0 };
+const tileLoadState = { loading: 0, errors: 0 };
 
 function showLoadingIndicator() {
   const indicator = document.getElementById('loading-indicator');
   if (indicator) indicator.classList.add('active');
+  const mapElement = document.getElementById('map');
+  if (mapElement) mapElement.setAttribute('aria-busy', 'true');
 }
 
 function hideLoadingIndicator() {
   const indicator = document.getElementById('loading-indicator');
   if (indicator && tileLoadState.loading === 0) indicator.classList.remove('active');
+  const mapElement = document.getElementById('map');
+  if (mapElement && tileLoadState.loading === 0) mapElement.setAttribute('aria-busy', 'false');
 }
 
 function updateLoadingCounter() {
   const counter = document.getElementById('tile-counter');
   if (counter) {
     counter.textContent = tileLoadState.loading > 0
-      ? `Loading ${tileLoadState.loading} tiles...`
+      ? `Loading ${tileLoadState.loading} map ${tileLoadState.loading === 1 ? 'layer' : 'layers'}...`
       : '';
   }
 }
@@ -48,26 +52,31 @@ function createTileLayer(pathTemplate, opts = {}) {
   };
 
   const layer = L.tileLayer(pathTemplate, Object.assign({}, defaults, opts));
+  let batchLoading = false;
 
-  layer.on('loading', () => {
+  function beginLoadingBatch() {
+    if (batchLoading) return;
+    batchLoading = true;
     tileLoadState.loading++;
     showLoadingIndicator();
     updateLoadingCounter();
-  });
+  }
 
-  layer.on('load', () => {
+  function endLoadingBatch() {
+    if (!batchLoading) return;
+    batchLoading = false;
     tileLoadState.loading = Math.max(0, tileLoadState.loading - 1);
-    tileLoadState.loaded++;
     updateLoadingCounter();
     hideLoadingIndicator();
-  });
+  }
+
+  layer.on('loading', beginLoadingBatch);
+  layer.on('load', endLoadingBatch);
+  layer.on('remove', endLoadingBatch);
 
   // Tiles outside the photo footprint 404 forever - never retry them.
   layer.on('tileerror', () => {
-    tileLoadState.loading = Math.max(0, tileLoadState.loading - 1);
     tileLoadState.errors++;
-    updateLoadingCounter();
-    hideLoadingIndicator();
   });
 
   return layer;
@@ -78,7 +87,7 @@ function historicLayerOptions(def) {
     attribution: def.attribution,
     minZoom: def.minZoom != null ? def.minZoom : 10,
     maxNativeZoom: def.maxNativeZoom,
-    maxZoom: MAP_MAX_ZOOM,
+    maxZoom: def.maxZoom != null ? def.maxZoom : MAP_MAX_ZOOM,
     bounds: L.latLngBounds(def.bounds),
     tms: def.scheme === 'tms'
   };
@@ -98,7 +107,7 @@ const BASE_LAYER_DEFS = [
     id: 'osm',
     name: 'OpenStreetMap',
     url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-    options: { maxZoom: 19, maxNativeZoom: 19, attribution: '&copy; OpenStreetMap contributors' }
+    options: { maxZoom: MAP_MAX_ZOOM, maxNativeZoom: 19, attribution: '&copy; OpenStreetMap contributors' }
   }
 ];
 
@@ -131,6 +140,7 @@ const app = {
   manifest: null,
   baseLayers: {},          // id -> L.TileLayer
   historicLayers: {},      // id -> L.TileLayer
+  historicLoadStates: {},  // id -> current tile batch state
   layerDefs: {},           // id -> manifest entry
   currentBaseId: 'esri',
   currentLayerId: null,
@@ -149,6 +159,57 @@ const app = {
 
 function currentHistoricLayer() {
   return app.currentLayerId ? app.historicLayers[app.currentLayerId] : null;
+}
+
+function resetHistoricLoadState(layerId) {
+  app.historicLoadStates[layerId] = { loaded: 0, errors: 0, settled: false };
+  updateActiveLayerStatus();
+}
+
+function updateActiveLayerStatus() {
+  const notice = document.getElementById('layer-status');
+  if (!notice || !app.map || !app.currentLayerId) {
+    if (notice) notice.hidden = true;
+    return;
+  }
+
+  const def = app.layerDefs[app.currentLayerId];
+  const state = app.historicLoadStates[app.currentLayerId];
+  const covered = def && L.latLngBounds(def.bounds).contains(app.map.getCenter());
+  const unavailable = covered && state && state.settled &&
+    state.loaded === 0 && state.errors > 0;
+
+  notice.hidden = !unavailable;
+  if (!unavailable) return;
+
+  const title = document.getElementById('layer-status-title');
+  const detail = document.getElementById('layer-status-detail');
+  const retry = document.getElementById('layer-status-retry');
+  if (title) title.textContent = `${def.name} tiles are unavailable`;
+  if (detail) detail.textContent = 'The historic imagery could not be loaded. The modern base map is still available.';
+  if (retry) retry.setAttribute('aria-label', `Retry loading ${def.name}`);
+}
+
+function bindHistoricLayerState(layer, def) {
+  resetHistoricLoadState(def.id);
+  layer.on('loading', () => resetHistoricLoadState(def.id));
+  layer.on('tileload', () => {
+    app.historicLoadStates[def.id].loaded++;
+  });
+  layer.on('tileerror', () => {
+    app.historicLoadStates[def.id].errors++;
+  });
+  layer.on('load', () => {
+    app.historicLoadStates[def.id].settled = true;
+    updateActiveLayerStatus();
+  });
+}
+
+function retryActiveHistoricLayer() {
+  const layer = currentHistoricLayer();
+  if (!layer || !app.currentLayerId) return;
+  resetHistoricLoadState(app.currentLayerId);
+  layer.redraw();
 }
 
 // Apply brightness/contrast as a CSS filter on the active historic layer's tile
@@ -190,18 +251,31 @@ function createSwipeDivider() {
   const mapEl = app.map.getContainer();
   const divider = document.createElement('div');
   divider.className = 'swipe-divider';
-  divider.innerHTML = '<div class="swipe-handle" title="Drag to compare">&#x2194;</div>';
+  divider.innerHTML = `
+    <div class="swipe-handle" role="slider" tabindex="0"
+      aria-label="Historic imagery comparison divider"
+      aria-valuemin="3" aria-valuemax="97" aria-valuenow="50"
+      aria-valuetext="50% historic imagery on the left"
+      aria-orientation="horizontal" title="Drag or use arrow keys to compare">&#x2194;</div>
+  `;
   mapEl.appendChild(divider);
   app.swipe.divider = divider;
 
   const handle = divider.querySelector('.swipe-handle');
 
+  function setSwipePosition(position) {
+    app.swipe.position = Math.min(0.97, Math.max(0.03, position));
+    const percent = Math.round(app.swipe.position * 100);
+    handle.setAttribute('aria-valuenow', String(percent));
+    handle.setAttribute('aria-valuetext', `${percent}% historic imagery on the left`);
+    updateSwipe();
+  }
+
   function onMove(e) {
     if (!app.swipe.dragging) return;
     const rect = mapEl.getBoundingClientRect();
     const x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
-    app.swipe.position = Math.min(0.97, Math.max(0.03, x / rect.width));
-    updateSwipe();
+    setSwipePosition(x / rect.width);
     e.preventDefault();
   }
 
@@ -218,12 +292,27 @@ function createSwipeDivider() {
     e.stopPropagation();
   }
 
+  function onKeyDown(e) {
+    const step = e.shiftKey ? 0.1 : 0.02;
+    let next = app.swipe.position;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') next -= step;
+    else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') next += step;
+    else if (e.key === 'Home') next = 0.03;
+    else if (e.key === 'End') next = 0.97;
+    else return;
+    e.preventDefault();
+    setSwipePosition(next);
+  }
+
   handle.addEventListener('mousedown', onDown);
   handle.addEventListener('touchstart', onDown, { passive: false });
+  handle.addEventListener('keydown', onKeyDown);
   document.addEventListener('mousemove', onMove);
   document.addEventListener('touchmove', onMove, { passive: false });
   document.addEventListener('mouseup', onUp);
   document.addEventListener('touchend', onUp);
+  document.addEventListener('touchcancel', onUp);
+  window.addEventListener('blur', onUp);
 
   app.map.on('move zoom viewreset resize', updateSwipe);
 }
@@ -284,6 +373,18 @@ function applyMode() {
 // ---------------------------------------------------------------------------
 // Four-panel historic comparison
 // ---------------------------------------------------------------------------
+function updateQuadrantAttribution() {
+  if (!app.quadrants || !app.quadrants.attribution) return;
+  const attributions = app.quadrants.panes
+    .map(pane => app.layerDefs[pane.layerId]?.attribution)
+    .filter((value, index, values) => value && values.indexOf(value) === index);
+  app.quadrants.attribution.innerHTML = [
+    '<a href="https://leafletjs.com" target="_blank" rel="noopener noreferrer">Leaflet</a>',
+    ...attributions
+  ].join(' <span aria-hidden="true">|</span> ');
+  app.quadrants.attribution.title = app.quadrants.attribution.textContent.trim();
+}
+
 function updatePaneNotices(pane) {
   const def = app.layerDefs[pane.layerId];
   const covered = def && L.latLngBounds(def.bounds).contains(pane.map.getCenter());
@@ -322,6 +423,7 @@ function setQuadrantLayer(pane, layerId) {
   updatePaneNotices(pane);
   if (app.quadrants) {
     app.quadrantLayerIds = app.quadrants.panes.map(item => item.layerId);
+    updateQuadrantAttribution();
     updateHash();
   }
 }
@@ -368,6 +470,7 @@ function enterQuadrantMode() {
       <button type="button" class="quadrant-exit" title="Return to single-map view" aria-label="Return to single-map view">&times;</button>
     </div>
     <div class="quadrant-grid"></div>
+    <div class="quadrant-attribution" aria-label="Map and imagery attribution"></div>
   `;
   app.map.getContainer().appendChild(container);
 
@@ -383,11 +486,11 @@ function enterQuadrantMode() {
           ${defs.map(def => `<option value="${def.id}">${def.name}</option>`).join('')}
         </select>
       </label>
-      <div class="quadrant-coverage-notice" hidden>
+      <div class="quadrant-coverage-notice" role="status" aria-live="polite" hidden>
         <strong>No imagery at this location</strong>
         <span>This survey does not cover the map centre.</span>
       </div>
-      <div class="quadrant-availability-notice" hidden>
+      <div class="quadrant-availability-notice" role="status" aria-live="polite" hidden>
         <strong>Historic tiles unavailable</strong>
         <span>The imagery could not be loaded. Try again shortly.</span>
       </div>
@@ -424,7 +527,13 @@ function enterQuadrantMode() {
     if (!app.quadrants) return;
     app.quadrants.panes.forEach(pane => pane.map.invalidateSize());
   };
-  app.quadrants = { container, panes, syncing: false, resizeHandler };
+  app.quadrants = {
+    container,
+    panes,
+    attribution: container.querySelector('.quadrant-attribution'),
+    syncing: false,
+    resizeHandler
+  };
   app.quadrantLayerIds = panes.map(pane => pane.layerId);
   window.addEventListener('resize', resizeHandler);
 
@@ -437,6 +546,7 @@ function enterQuadrantMode() {
   });
   resizeHandler();
   updateQuadrantCoverage();
+  updateQuadrantAttribution();
   updateHash();
 }
 
@@ -477,7 +587,9 @@ function selectHistoricLayer(layerId) {
 
   // Update timeline UI
   document.querySelectorAll('.timeline-chip').forEach(chip => {
-    chip.classList.toggle('active', (chip.dataset.id || null) === app.currentLayerId);
+    const active = (chip.dataset.id || null) === app.currentLayerId;
+    chip.classList.toggle('active', active);
+    chip.setAttribute('aria-pressed', String(active));
   });
   const label = document.getElementById('timeline-label');
   if (label) {
@@ -487,6 +599,7 @@ function selectHistoricLayer(layerId) {
   updateFootprint();
   applyMode();
   applyImageAdjust();   // re-apply brightness/contrast to the newly-active layer
+  updateActiveLayerStatus();
   updateAttribution();
   updateHash();
 }
@@ -521,15 +634,16 @@ function createTimeline(manifest) {
   // a bare "1965" chip can't tell them apart - show the full name in that case.
   const yearCounts = {};
   sorted.forEach(d => { yearCounts[d.year] = (yearCounts[d.year] || 0) + 1; });
-  const chipLabel = def => yearCounts[def.year] > 1 ? def.name : String(def.year);
+  const chipLabel = def => def.timelineLabel ||
+    (yearCounts[def.year] > 1 ? def.name : String(def.year));
 
   wrap.innerHTML = `
-    <div class="timeline-label" id="timeline-label">Modern imagery</div>
-    <div class="timeline-track">
+    <div class="timeline-label" id="timeline-label" aria-live="polite">Modern imagery</div>
+    <div class="timeline-track" role="group" aria-label="Historic imagery layer">
       ${sorted.map(def => `
-        <button class="timeline-chip" data-id="${def.id}" title="${def.name}">${chipLabel(def)}</button>
+        <button type="button" class="timeline-chip" data-id="${def.id}" title="${def.name}" aria-pressed="false">${chipLabel(def)}</button>
       `).join('')}
-      <button class="timeline-chip" data-id="" title="Hide historic imagery">Today</button>
+      <button type="button" class="timeline-chip active" data-id="" title="Hide historic imagery" aria-pressed="true">Today</button>
     </div>
   `;
   mapEl.appendChild(wrap);
@@ -756,16 +870,24 @@ function createOpacitySlider() {
   control.onAdd = function () {
     const div = L.DomUtil.create('div', 'opacity-slider-container');
     div.innerHTML = `
-      <button type="button" id="opacity-toggle" class="opacity-toggle" aria-label="Open image enhancement controls" aria-expanded="false"><span>Image</span><span>Enhancement</span></button>
-      <div class="opacity-controls">
-        <div class="opacity-label">Historic Overlay Opacity</div>
+      <button type="button" id="opacity-toggle" class="opacity-toggle" aria-label="Open image enhancement controls" aria-expanded="false" aria-controls="image-enhancement-controls"><span>Image</span><span>Enhancement</span></button>
+      <div class="opacity-controls" id="image-enhancement-controls">
+        <div class="range-heading">
+          <label class="opacity-label" for="opacity-slider">Historic Overlay Opacity</label>
+          <output class="opacity-value" id="opacity-value" for="opacity-slider">${Math.round(app.opacity * 100)}%</output>
+        </div>
         <input type="range" id="opacity-slider" min="0" max="100" value="${Math.round(app.opacity * 100)}" class="opacity-slider">
-        <div class="opacity-value" id="opacity-value">${Math.round(app.opacity * 100)}%</div>
-        <div class="opacity-label" style="margin-top:8px">Brightness</div>
+        <div class="range-heading range-heading-spaced">
+          <label class="opacity-label" for="brightness-slider">Brightness</label>
+          <output class="opacity-value" id="brightness-value" for="brightness-slider">${Math.round(app.brightness * 100)}%</output>
+        </div>
         <input type="range" id="brightness-slider" min="50" max="150" value="${Math.round(app.brightness * 100)}" class="opacity-slider">
-        <div class="opacity-label" style="margin-top:6px">Contrast</div>
+        <div class="range-heading range-heading-spaced">
+          <label class="opacity-label" for="contrast-slider">Contrast</label>
+          <output class="opacity-value" id="contrast-value" for="contrast-slider">${Math.round(app.contrast * 100)}%</output>
+        </div>
         <input type="range" id="contrast-slider" min="50" max="200" value="${Math.round(app.contrast * 100)}" class="opacity-slider">
-        <div style="text-align:center;margin-top:4px"><button id="bc-reset" style="font:11px system-ui;padding:3px 10px;border:1px solid #99a;border-radius:5px;background:#f6f7ff;cursor:pointer">Reset B/C</button></div>
+        <div class="enhancement-reset-wrap"><button type="button" id="bc-reset" class="enhancement-reset">Reset brightness and contrast</button></div>
       </div>
     `;
     div.style.display = 'none';
@@ -809,7 +931,9 @@ async function init() {
 
   manifest.layers.forEach(def => {
     app.layerDefs[def.id] = def;
-    app.historicLayers[def.id] = createTileLayer(def.url, historicLayerOptions(def));
+    const layer = createTileLayer(def.url, historicLayerOptions(def));
+    app.historicLayers[def.id] = layer;
+    bindHistoricLayerState(layer, def);
   });
 
   // Restore state from the URL hash if present
@@ -837,6 +961,9 @@ async function init() {
   createSwipeDivider();
   setupGcpPicker();
 
+  const layerStatusRetry = document.getElementById('layer-status-retry');
+  if (layerStatusRetry) layerStatusRetry.addEventListener('click', retryActiveHistoricLayer);
+
   // Address search (Nominatim), biased towards the map area
   if (L.Control.geocoder) {
     L.Control.geocoder({
@@ -863,18 +990,31 @@ async function init() {
 
   // Brightness / contrast sliders (CSS filter on the active historic layer)
   const bSlider = document.getElementById('brightness-slider');
-  if (bSlider) bSlider.addEventListener('input', e => { app.brightness = e.target.value / 100; applyImageAdjust(); });
+  const bValue = document.getElementById('brightness-value');
+  if (bSlider) bSlider.addEventListener('input', e => {
+    app.brightness = e.target.value / 100;
+    if (bValue) bValue.textContent = `${e.target.value}%`;
+    applyImageAdjust();
+  });
   const cSlider = document.getElementById('contrast-slider');
-  if (cSlider) cSlider.addEventListener('input', e => { app.contrast = e.target.value / 100; applyImageAdjust(); });
+  const cValue = document.getElementById('contrast-value');
+  if (cSlider) cSlider.addEventListener('input', e => {
+    app.contrast = e.target.value / 100;
+    if (cValue) cValue.textContent = `${e.target.value}%`;
+    applyImageAdjust();
+  });
   const bcReset = document.getElementById('bc-reset');
   if (bcReset) bcReset.addEventListener('click', () => {
     app.brightness = 1; app.contrast = 1;
     if (bSlider) bSlider.value = 100;
     if (cSlider) cSlider.value = 100;
+    if (bValue) bValue.textContent = '100%';
+    if (cValue) cValue.textContent = '100%';
     applyImageAdjust();
   });
 
   app.map.on('moveend zoomend', updateHash);
+  app.map.on('moveend zoomend', updateActiveLayerStatus);
 
   updateAttribution();
 
@@ -901,7 +1041,31 @@ async function init() {
 const splashScreen = document.getElementById('splash-screen');
 const continueBtn = document.getElementById('continue-btn');
 if (splashScreen && continueBtn) {
-  continueBtn.addEventListener('click', () => splashScreen.classList.add('hidden'));
+  const backgroundRegions = [
+    document.getElementById('site-header'),
+    document.getElementById('map')
+  ].filter(Boolean);
+
+  backgroundRegions.forEach(region => { region.inert = true; });
+
+  function dismissSplash() {
+    splashScreen.classList.add('hidden');
+    splashScreen.setAttribute('aria-hidden', 'true');
+    backgroundRegions.forEach(region => { region.inert = false; });
+    if (app.map) app.map.getContainer().focus();
+  }
+
+  continueBtn.addEventListener('click', dismissSplash);
+  splashScreen.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      dismissSplash();
+    } else if (event.key === 'Tab') {
+      event.preventDefault();
+      continueBtn.focus();
+    }
+  });
+  requestAnimationFrame(() => continueBtn.focus());
 }
 
 init().catch(err => console.error('Initialization failed:', err));

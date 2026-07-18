@@ -168,6 +168,68 @@
       display: flex;
     }
 
+    .layer-status {
+      position: fixed;
+      top: 58px;
+      left: 50%;
+      z-index: 1600;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      width: min(560px, calc(100% - 28px));
+      padding: 11px 12px 11px 14px;
+      transform: translateX(-50%);
+      border: 1px solid #f59e0b;
+      border-radius: 9px;
+      background: rgba(255, 251, 235, 0.97);
+      color: #78350f;
+      box-shadow: 0 4px 18px rgba(15, 23, 42, 0.25);
+      font-family: "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+
+    .layer-status[hidden] {
+      display: none;
+    }
+
+    .layer-status-copy {
+      display: grid;
+      flex: 1;
+      gap: 2px;
+      min-width: 0;
+    }
+
+    .layer-status-copy strong {
+      font-size: 13px;
+      line-height: 1.25;
+    }
+
+    .layer-status-copy span {
+      color: #92400e;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    #layer-status-retry {
+      flex: 0 0 auto;
+      min-height: 34px;
+      padding: 6px 12px;
+      border: 1px solid #b45309;
+      border-radius: 6px;
+      background: #b45309;
+      color: #fff;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    #layer-status-retry:hover {
+      background: #92400e;
+    }
+
+    #layer-status-retry:focus-visible {
+      outline: 3px solid #0e7490;
+      outline-offset: 2px;
+    }
+
     .loading-spinner {
       width: 16px;
       height: 16px;
@@ -384,7 +446,18 @@
       font-size: 12px;
       font-weight: 600;
       color: #0f172a;
-      margin-bottom: 8px;
+    }
+
+    .range-heading {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 7px;
+    }
+
+    .range-heading-spaced {
+      margin-top: 10px;
     }
 
     .opacity-slider {
@@ -426,8 +499,32 @@
     .opacity-value {
       font-size: 12px;
       color: #64748b;
-      margin-top: 6px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .enhancement-reset-wrap {
+      margin-top: 11px;
       text-align: center;
+    }
+
+    .enhancement-reset {
+      padding: 4px 9px;
+      border: 1px solid #94a3b8;
+      border-radius: 5px;
+      background: #f8fafc;
+      color: #334155;
+      font: 600 11px/1.2 "Segoe UI", sans-serif;
+      cursor: pointer;
+    }
+
+    .enhancement-reset:hover {
+      background: #e2e8f0;
+    }
+
+    .enhancement-reset:focus-visible,
+    .opacity-slider:focus-visible {
+      outline: 3px solid #22d3ee;
+      outline-offset: 2px;
     }
 
     /* Timeline control (bottom centre) */
@@ -481,6 +578,11 @@
 
     .timeline-chip:hover {
       background: #334155;
+    }
+
+    .timeline-chip:focus-visible {
+      outline: 3px solid #22d3ee;
+      outline-offset: 2px;
     }
 
     .timeline-chip.active {
@@ -614,6 +716,31 @@
       background: #475569;
     }
 
+    .quadrant-attribution {
+      position: absolute;
+      bottom: 3px;
+      left: 50%;
+      z-index: 2002;
+      max-width: calc(100% - 12px);
+      padding: 2px 7px;
+      transform: translateX(-50%);
+      overflow-x: auto;
+      border-radius: 3px;
+      background: rgba(255, 255, 255, 0.9);
+      color: #334155;
+      font: 10px/1.35 "Segoe UI", sans-serif;
+      white-space: nowrap;
+    }
+
+    .quadrant-attribution a {
+      color: #1d4ed8;
+      text-decoration: none;
+    }
+
+    .quadrant-attribution a:hover {
+      text-decoration: underline;
+    }
+
     .sr-only {
       position: absolute;
       width: 1px;
@@ -648,7 +775,7 @@
       .quadrant-toolbar {
         top: auto;
         right: 5px;
-        bottom: 5px;
+        bottom: 28px;
         font-size: 11px;
       }
       .quadrant-toolbar span {
@@ -704,6 +831,23 @@
       touch-action: none;
     }
 
+    .swipe-handle:focus-visible {
+      outline: 3px solid #22d3ee;
+      outline-offset: 3px;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .loading-spinner {
+        animation: none;
+      }
+      .layer-control-toggle svg,
+      .timeline-chip,
+      .opacity-toggle,
+      #continue-btn {
+        transition: none;
+      }
+    }
+
     /* Adjust Leaflet control positioning */
     .leaflet-top.leaflet-right {
       margin-top: 8px;
@@ -721,18 +865,27 @@
 </head>
 <body>
   <!-- Loading Indicator -->
-  <div id="loading-indicator">
-    <div class="loading-spinner"></div>
+  <div id="loading-indicator" role="status" aria-live="polite" aria-atomic="true">
+    <div class="loading-spinner" aria-hidden="true"></div>
     <span id="tile-counter"></span>
+  </div>
+
+  <!-- Active historic layer availability -->
+  <div id="layer-status" class="layer-status" role="status" aria-live="polite" aria-atomic="true" hidden>
+    <div class="layer-status-copy">
+      <strong id="layer-status-title">Historic tiles are unavailable</strong>
+      <span id="layer-status-detail">The historic imagery could not be loaded.</span>
+    </div>
+    <button type="button" id="layer-status-retry">Retry</button>
   </div>
 
   <!-- Splash Screen -->
   <div id="splash-screen">
-    <div id="splash-content">
-      <h2>Disclaimer</h2>
-      <p>The aerial imagery displayed on this website may not be precisely aligned or positioned. Variations can occur due to the age of the source imagery, differences in capture dates, and the accuracy of the original coordinate data. Users should treat the imagery as indicative only and not rely on it for precise measurements or navigation.</p>
-      <h2>Imagery Acknowledgment</h2>
-      <p>This website uses aerial imagery sourced from the Queensland Government's QImagery program. Data is provided under the terms and conditions of the Queensland Government's Online Services Terms and Conditions.</p>
+    <div id="splash-content" role="dialog" aria-modal="true" aria-labelledby="splash-title splash-acknowledgement-title" aria-describedby="splash-disclaimer splash-acknowledgement">
+      <h2 id="splash-title">Disclaimer</h2>
+      <p id="splash-disclaimer">The aerial imagery displayed on this website may not be precisely aligned or positioned. Variations can occur due to the age of the source imagery, differences in capture dates, and the accuracy of the original coordinate data. Users should treat the imagery as indicative only and not rely on it for precise measurements or navigation.</p>
+      <h2 id="splash-acknowledgement-title">Imagery Acknowledgment</h2>
+      <p id="splash-acknowledgement">This website uses aerial imagery sourced from the Queensland Government's QImagery program. Data is provided under the terms and conditions of the Queensland Government's Online Services Terms and Conditions.</p>
       <button id="continue-btn">Continue</button>
     </div>
   </div>
@@ -746,7 +899,7 @@
   </header>
   
   <!-- Map Container -->
-  <div id="map"></div>
+  <div id="map" aria-label="Interactive map of Cairns historic aerial imagery" aria-busy="false"></div>
 
   <!-- Leaflet JS (vendored locally, see vendor/) -->
   <script src="vendor/leaflet.js"></script>
