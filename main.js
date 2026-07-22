@@ -408,6 +408,10 @@ function setQuadrantLayer(pane, layerId) {
   const def = app.layerDefs[layerId];
   if (!def) return;
   if (pane.layer) pane.map.removeLayer(pane.layer);
+  if (pane.coverageBoundary) {
+    pane.map.removeLayer(pane.coverageBoundary);
+    pane.coverageBoundary = null;
+  }
   pane.layerId = layerId;
   resetPaneTileState(pane);
   pane.layer = createTileLayer(def.url, historicLayerOptions(def));
@@ -419,6 +423,15 @@ function setQuadrantLayer(pane, layerId) {
     updatePaneNotices(pane);
   });
   pane.layer.addTo(pane.map);
+  if (def.showBoundaryInQuadrants) {
+    pane.coverageBoundary = L.rectangle(def.bounds, {
+      color: def.boundaryColor || '#06b6d4',
+      weight: 3,
+      dashArray: '8 6',
+      fill: false,
+      interactive: false
+    }).addTo(pane.map);
+  }
   pane.select.value = layerId;
   updatePaneNotices(pane);
   if (app.quadrants) {
@@ -511,6 +524,7 @@ function enterQuadrantMode() {
       map,
       layerId,
       layer: null,
+      coverageBoundary: null,
       select: paneEl.querySelector('.quadrant-select'),
       coverageNotice: paneEl.querySelector('.quadrant-coverage-notice'),
       availabilityNotice: paneEl.querySelector('.quadrant-availability-notice'),
@@ -558,7 +572,11 @@ function updateFootprint() {
   const def = app.currentLayerId ? app.layerDefs[app.currentLayerId] : null;
   if (def && app.showFootprint) {
     app.footprintRect = L.rectangle(def.bounds, {
-      color: '#06b6d4', weight: 2, dashArray: '6 6', fill: false, interactive: false
+      color: def.boundaryColor || '#06b6d4',
+      weight: 2,
+      dashArray: '6 6',
+      fill: false,
+      interactive: false
     }).addTo(app.map);
   }
 }
@@ -570,7 +588,6 @@ function selectHistoricLayer(layerId) {
     if (container) container.style.clip = '';
     app.map.removeLayer(previous);
   }
-
   app.currentLayerId = layerId && app.historicLayers[layerId] ? layerId : null;
   const layer = currentHistoricLayer();
 
@@ -579,6 +596,11 @@ function selectHistoricLayer(layerId) {
     layer.bringToFront();
     // Jump to the layer only if it's nowhere in the current view
     const def = app.layerDefs[app.currentLayerId];
+    if (def.showBoundaryByDefault) {
+      app.showFootprint = true;
+      const footprintToggle = document.getElementById('footprint-toggle');
+      if (footprintToggle) footprintToggle.checked = true;
+    }
     const layerBounds = L.latLngBounds(def.bounds);
     if (!app.map.getBounds().intersects(layerBounds)) {
       app.map.fitBounds(layerBounds);
