@@ -110,6 +110,76 @@ window.MAP_CONFIG = {
         ]
       ],
       "attribution": "Cairns 1972 &mdash; Queensland Government QImagery"
+    },
+    {
+      "id": "cairns1977",
+      "name": "Cairns 1977",
+      "timelineLabel": "1977",
+      "year": 1977,
+      "url": "https://filedn.com/lnwtRrhS2tTy2K4EooXWFnR/tiles/historic/cairns1977/{z}/{x}/{y}.webp",
+      "scheme": "xyz",
+      "minZoom": 10,
+      "maxNativeZoom": 19,
+      "bounds": [
+        [
+          -17.02921196640138,
+          145.6244659423828
+        ],
+        [
+          -16.705916989193067,
+          145.8489990234375
+        ]
+      ],
+      "attribution": "Cairns 1977 &mdash; Queensland Government QImagery"
+    },
+    {
+      "id": "cairns1977-webodm-review",
+      "name": "Cairns 1977 (WebODM review)",
+      "timelineLabel": "1977 review",
+      "year": 1977,
+      "url": "http://127.0.0.1:8139/cairns1977/aws_final_20260720/tiles_review_rgba_z10_16/{z}/{x}/{y}.webp",
+      "scheme": "xyz",
+      "minZoom": 10,
+      "maxNativeZoom": 16,
+      "maxZoom": 20,
+      "showBoundaryInQuadrants": true,
+      "showBoundaryByDefault": true,
+      "boundaryColor": "#ef4444",
+      "bounds": [
+        [
+          -17.0067222,
+          145.6689691
+        ],
+        [
+          -16.7543896,
+          145.785739
+        ]
+      ],
+      "attribution": "Cairns 1977 &mdash; local WebODM production review (16 cm source orthophoto; review tiles to zoom 16)"
+    },
+    {
+      "id": "cairns1977-local-cohesive-v3",
+      "name": "Cairns 1977 (earlier local coverage)",
+      "timelineLabel": "1977 local",
+      "year": 1977,
+      "url": "http://127.0.0.1:8139/cairns1977/full_browser_exact_20260717/tiles/cairns1977_full_browser_exact_cohesive_v3_z16/{z}/{x}/{y}.webp",
+      "scheme": "xyz",
+      "minZoom": 10,
+      "maxNativeZoom": 16,
+      "maxZoom": 20,
+      "showBoundaryInQuadrants": true,
+      "boundaryColor": "#06b6d4",
+      "bounds": [
+        [
+          -17.0200202,
+          145.6512451
+        ],
+        [
+          -16.7203851,
+          145.7885742
+        ]
+      ],
+      "attribution": "Cairns 1977 &mdash; earlier local cohesive-v3 coverage comparison (1,042 aligned source frames; review tiles to zoom 16)"
     }
   ]
 };
