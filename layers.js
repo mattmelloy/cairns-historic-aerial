@@ -131,6 +131,27 @@ window.MAP_CONFIG = {
         ]
       ],
       "attribution": "Cairns 1977 &mdash; Queensland Government QImagery"
+    },
+    {
+      "id": "cairns1983",
+      "name": "Cairns 1983",
+      "timelineLabel": "1983",
+      "year": 1983,
+      "url": "https://filedn.com/lnwtRrhS2tTy2K4EooXWFnR/tiles/historic/cairns83/{z}/{x}/{y}.webp",
+      "scheme": "xyz",
+      "minZoom": 10,
+      "maxNativeZoom": 20,
+      "bounds": [
+        [
+          -17.02921196640138,
+          145.6244659423828
+        ],
+        [
+          -16.705916989193067,
+          145.8489990234375
+        ]
+      ],
+      "attribution": "Cairns 1983 &mdash; Queensland Government QImagery"
     }
   ]
 };
