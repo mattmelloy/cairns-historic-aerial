@@ -152,6 +152,30 @@ window.MAP_CONFIG = {
         ]
       ],
       "attribution": "Cairns 1983 &mdash; Queensland Government QImagery"
+    },
+    {
+      "id": "cairns1987beaches",
+      "name": "1987 Beaches",
+      "timelineLabel": "1987 Beaches",
+      "year": 1987,
+      "tileUrls": [
+        "https://filedn.com/lnwtRrhS2tTy2K4EooXWFnR/tiles/historic/cairns87beachesmain/{z}/{x}/{y}.webp",
+        "https://filedn.com/lnwtRrhS2tTy2K4EooXWFnR/tiles/historic/cairns87beachesDoubleIsland/cairns1987_qap4674_004_c1250_rotated180_gcp_aligned_z19_q90/{z}/{x}/{y}.webp"
+      ],
+      "scheme": "xyz",
+      "minZoom": 10,
+      "maxNativeZoom": 19,
+      "bounds": [
+        [
+          -17.02921196640138,
+          145.6244659423828
+        ],
+        [
+          -16.705916989193067,
+          145.8489990234375
+        ]
+      ],
+      "attribution": "1987 Beaches &mdash; Queensland Government QImagery"
     }
   ]
 };

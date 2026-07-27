@@ -82,6 +82,43 @@ function createTileLayer(pathTemplate, opts = {}) {
   return layer;
 }
 
+function historicTileLayers(layer) {
+  return layer?._historicTileLayers || (layer ? [layer] : []);
+}
+
+function historicLayerContainers(layer) {
+  return historicTileLayers(layer)
+    .map(tileLayer => tileLayer.getContainer())
+    .filter(Boolean);
+}
+
+function createHistoricLayer(def) {
+  const tileUrls = Array.isArray(def.tileUrls) && def.tileUrls.length
+    ? def.tileUrls
+    : [def.url];
+  const tileLayers = tileUrls.map(url => createTileLayer(url, historicLayerOptions(def)));
+
+  if (tileLayers.length === 1) return tileLayers[0];
+
+  const composite = L.layerGroup(tileLayers);
+  composite._historicTileLayers = tileLayers;
+  composite.options.attribution = def.attribution;
+  composite.setOpacity = opacity => {
+    tileLayers.forEach(layer => layer.setOpacity(opacity));
+    return composite;
+  };
+  composite.bringToFront = () => {
+    tileLayers.forEach(layer => layer.bringToFront());
+    return composite;
+  };
+  composite.redraw = () => {
+    tileLayers.forEach(layer => layer.redraw());
+    return composite;
+  };
+
+  return composite;
+}
+
 function historicLayerOptions(def) {
   return {
     attribution: def.attribution,
@@ -192,16 +229,29 @@ function updateActiveLayerStatus() {
 
 function bindHistoricLayerState(layer, def) {
   resetHistoricLoadState(def.id);
-  layer.on('loading', () => resetHistoricLoadState(def.id));
-  layer.on('tileload', () => {
-    app.historicLoadStates[def.id].loaded++;
-  });
-  layer.on('tileerror', () => {
-    app.historicLoadStates[def.id].errors++;
-  });
-  layer.on('load', () => {
-    app.historicLoadStates[def.id].settled = true;
-    updateActiveLayerStatus();
+  const sources = historicTileLayers(layer);
+  const settledSources = new Set();
+
+  sources.forEach(source => {
+    source.on('loading', () => {
+      if (settledSources.size === sources.length) {
+        settledSources.clear();
+        resetHistoricLoadState(def.id);
+      }
+    });
+    source.on('tileload', () => {
+      app.historicLoadStates[def.id].loaded++;
+    });
+    source.on('tileerror', () => {
+      app.historicLoadStates[def.id].errors++;
+    });
+    source.on('load', () => {
+      settledSources.add(source);
+      if (settledSources.size === sources.length) {
+        app.historicLoadStates[def.id].settled = true;
+        updateActiveLayerStatus();
+      }
+    });
   });
 }
 
@@ -218,8 +268,9 @@ function retryActiveHistoricLayer() {
 function applyImageAdjust() {
   const layer = currentHistoricLayer();
   if (!layer) return;
-  const c = layer.getContainer();
-  if (c) c.style.filter = `brightness(${app.brightness}) contrast(${app.contrast})`;
+  historicLayerContainers(layer).forEach(container => {
+    container.style.filter = `brightness(${app.brightness}) contrast(${app.contrast})`;
+  });
 }
 
 function updateHash() {
@@ -328,16 +379,18 @@ function updateSwipe() {
     app.swipe.divider.style.left = `${app.swipe.position * 100}%`;
   }
   if (!layer) return;
-  const container = layer.getContainer();
-  if (!container) return;
+  const containers = historicLayerContainers(layer);
+  if (!containers.length) return;
   if (!active) {
-    container.style.clip = '';
+    containers.forEach(container => { container.style.clip = ''; });
     return;
   }
   const nw = app.map.containerPointToLayerPoint([0, 0]);
   const se = app.map.containerPointToLayerPoint(app.map.getSize());
   const clipX = nw.x + (se.x - nw.x) * app.swipe.position;
-  container.style.clip = `rect(${nw.y}px, ${clipX}px, ${se.y}px, ${nw.x}px)`;
+  containers.forEach(container => {
+    container.style.clip = `rect(${nw.y}px, ${clipX}px, ${se.y}px, ${nw.x}px)`;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -414,13 +467,25 @@ function setQuadrantLayer(pane, layerId) {
   }
   pane.layerId = layerId;
   resetPaneTileState(pane);
-  pane.layer = createTileLayer(def.url, historicLayerOptions(def));
-  pane.layer.on('loading', () => resetPaneTileState(pane));
-  pane.layer.on('tileload', () => { pane.tileState.loaded++; });
-  pane.layer.on('tileerror', () => { pane.tileState.errors++; });
-  pane.layer.on('load', () => {
-    pane.tileState.settled = true;
-    updatePaneNotices(pane);
+  pane.layer = createHistoricLayer(def);
+  const sources = historicTileLayers(pane.layer);
+  const settledSources = new Set();
+  sources.forEach(source => {
+    source.on('loading', () => {
+      if (settledSources.size === sources.length) {
+        settledSources.clear();
+        resetPaneTileState(pane);
+      }
+    });
+    source.on('tileload', () => { pane.tileState.loaded++; });
+    source.on('tileerror', () => { pane.tileState.errors++; });
+    source.on('load', () => {
+      settledSources.add(source);
+      if (settledSources.size === sources.length) {
+        pane.tileState.settled = true;
+        updatePaneNotices(pane);
+      }
+    });
   });
   pane.layer.addTo(pane.map);
   if (def.showBoundaryInQuadrants) {
@@ -584,8 +649,7 @@ function updateFootprint() {
 function selectHistoricLayer(layerId) {
   const previous = currentHistoricLayer();
   if (previous) {
-    const container = previous.getContainer();
-    if (container) container.style.clip = '';
+    historicLayerContainers(previous).forEach(container => { container.style.clip = ''; });
     app.map.removeLayer(previous);
   }
   app.currentLayerId = layerId && app.historicLayers[layerId] ? layerId : null;
@@ -953,7 +1017,7 @@ async function init() {
 
   manifest.layers.forEach(def => {
     app.layerDefs[def.id] = def;
-    const layer = createTileLayer(def.url, historicLayerOptions(def));
+    const layer = createHistoricLayer(def);
     app.historicLayers[def.id] = layer;
     bindHistoricLayerState(layer, def);
   });
