@@ -159,8 +159,8 @@ window.MAP_CONFIG = {
       "timelineLabel": "1987 Beaches",
       "year": 1987,
       "tileUrls": [
-        "https://filedn.com/lnwtRrhS2tTy2K4EooXWFnR/tiles/historic/cairns87beachesmain/{z}/{x}/{y}.webp",
-        "https://filedn.com/lnwtRrhS2tTy2K4EooXWFnR/tiles/historic/cairns87beachesDoubleIsland/cairns1987_qap4674_004_c1250_rotated180_gcp_aligned_z19_q90/{z}/{x}/{y}.webp"
+        "https://filedn.com/lnwtRrhS2tTy2K4EooXWFnR/tiles/historic/cairns87beachesDoubleIsland/{z}/{x}/{y}.webp",
+        "https://filedn.com/lnwtRrhS2tTy2K4EooXWFnR/tiles/historic/cairns87beachesmain/{z}/{x}/{y}.webp"
       ],
       "scheme": "xyz",
       "minZoom": 10,
