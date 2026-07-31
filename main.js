@@ -185,6 +185,10 @@ const app = {
   opacity: 0.7,
   showFootprint: false,
   footprintRect: null,
+  showReferenceOverlay: false,
+  referenceOverlay: null,
+  referenceOverlayRequest: 0,
+  referenceOverlayCache: new Map(),
   swipe: { position: 0.5, divider: null, dragging: false },
   gcpPicker: false,        // click-to-copy coordinate picker (for GCP collection)
   gcpMarker: null,
@@ -465,6 +469,10 @@ function setQuadrantLayer(pane, layerId) {
     pane.map.removeLayer(pane.coverageBoundary);
     pane.coverageBoundary = null;
   }
+  if (pane.referenceOverlay) {
+    pane.map.removeLayer(pane.referenceOverlay);
+    pane.referenceOverlay = null;
+  }
   pane.layerId = layerId;
   resetPaneTileState(pane);
   pane.layer = createHistoricLayer(def);
@@ -488,6 +496,7 @@ function setQuadrantLayer(pane, layerId) {
     });
   });
   pane.layer.addTo(pane.map);
+  updatePaneReferenceOverlay(pane, def);
   if (def.showBoundaryInQuadrants) {
     pane.coverageBoundary = L.rectangle(def.bounds, {
       color: def.boundaryColor || '#06b6d4',
@@ -590,6 +599,8 @@ function enterQuadrantMode() {
       layerId,
       layer: null,
       coverageBoundary: null,
+      referenceOverlay: null,
+      referenceOverlayRequest: 0,
       select: paneEl.querySelector('.quadrant-select'),
       coverageNotice: paneEl.querySelector('.quadrant-coverage-notice'),
       availabilityNotice: paneEl.querySelector('.quadrant-availability-notice'),
@@ -646,6 +657,97 @@ function updateFootprint() {
   }
 }
 
+function loadReferenceOverlay(url) {
+  if (!app.referenceOverlayCache.has(url)) {
+    const request = fetch(url).then(response => {
+      if (!response.ok) throw new Error(`Could not load reference overlay (${response.status})`);
+      return response.json();
+    }).catch(error => {
+      app.referenceOverlayCache.delete(url);
+      throw error;
+    });
+    app.referenceOverlayCache.set(url, request);
+  }
+  return app.referenceOverlayCache.get(url);
+}
+
+function referenceOverlayStyle(feature) {
+  const isDamWall = feature.properties?.id === 'tinaroo-falls-dam-wall';
+  return {
+    color: isDamWall ? '#f97316' : '#06b6d4',
+    weight: isDamWall ? 2.5 : 2,
+    opacity: 0.95,
+    dashArray: isDamWall ? null : '7 5',
+    fill: false
+  };
+}
+
+function createReferenceOverlay(collection) {
+  return L.geoJSON(collection, {
+    pane: 'overlayPane',
+    style: referenceOverlayStyle,
+    onEachFeature: (feature, layer) => {
+      const label = feature.properties?.label;
+      if (label) layer.bindTooltip(label, { sticky: true });
+    }
+  });
+}
+
+function updateReferenceOverlayControl() {
+  const option = document.getElementById('reference-overlay-option');
+  const checkbox = document.getElementById('reference-overlay-toggle');
+  const label = document.getElementById('reference-overlay-label');
+  const def = app.currentLayerId ? app.layerDefs[app.currentLayerId] : null;
+  const available = Boolean(def?.referenceOverlayUrl);
+
+  if (option) option.hidden = !available;
+  if (label) label.textContent = def?.referenceOverlayLabel || 'Show reference boundary';
+  app.showReferenceOverlay = available;
+  if (checkbox) checkbox.checked = available;
+}
+
+async function updateReferenceOverlay() {
+  const requestId = ++app.referenceOverlayRequest;
+  const def = app.currentLayerId ? app.layerDefs[app.currentLayerId] : null;
+
+  if (app.referenceOverlay) {
+    app.map.removeLayer(app.referenceOverlay);
+    app.referenceOverlay = null;
+  }
+  if (!app.showReferenceOverlay || !def?.referenceOverlayUrl) return;
+
+  try {
+    const collection = await loadReferenceOverlay(def.referenceOverlayUrl);
+    if (requestId !== app.referenceOverlayRequest || app.currentLayerId !== def.id) return;
+    app.referenceOverlay = createReferenceOverlay(collection).addTo(app.map);
+    app.referenceOverlay.bringToFront();
+  } catch (error) {
+    console.error('Could not display reference overlay', error);
+    if (requestId !== app.referenceOverlayRequest) return;
+    app.showReferenceOverlay = false;
+    const checkbox = document.getElementById('reference-overlay-toggle');
+    if (checkbox) checkbox.checked = false;
+  }
+}
+
+async function updatePaneReferenceOverlay(pane, def) {
+  const requestId = ++pane.referenceOverlayRequest;
+  if (pane.referenceOverlay) {
+    pane.map.removeLayer(pane.referenceOverlay);
+    pane.referenceOverlay = null;
+  }
+  if (!def.referenceOverlayUrl) return;
+
+  try {
+    const collection = await loadReferenceOverlay(def.referenceOverlayUrl);
+    if (requestId !== pane.referenceOverlayRequest || pane.layerId !== def.id) return;
+    pane.referenceOverlay = createReferenceOverlay(collection).addTo(pane.map);
+    pane.referenceOverlay.bringToFront();
+  } catch (error) {
+    console.error('Could not display quadrant reference overlay', error);
+  }
+}
+
 function selectHistoricLayer(layerId) {
   const previous = currentHistoricLayer();
   if (previous) {
@@ -682,6 +784,8 @@ function selectHistoricLayer(layerId) {
     label.textContent = layer ? app.layerDefs[app.currentLayerId].name : 'Modern imagery';
   }
 
+  updateReferenceOverlayControl();
+  updateReferenceOverlay();
   updateFootprint();
   applyMode();
   applyImageAdjust();   // re-apply brightness/contrast to the newly-active layer
@@ -799,6 +903,10 @@ function createLayerControl() {
             <input type="checkbox" id="footprint-toggle">
             <span>Show coverage outline</span>
           </label>
+          <label class="layer-option" id="reference-overlay-option" hidden>
+            <input type="checkbox" id="reference-overlay-toggle">
+            <span id="reference-overlay-label">Show reference boundary</span>
+          </label>
           <label class="layer-option">
             <input type="checkbox" id="gcp-toggle">
             <span>Coordinate picker (click&nbsp;&rarr;&nbsp;copy)</span>
@@ -845,6 +953,11 @@ function createLayerControl() {
     div.querySelector('#footprint-toggle').addEventListener('change', e => {
       app.showFootprint = e.target.checked;
       updateFootprint();
+    });
+
+    div.querySelector('#reference-overlay-toggle').addEventListener('change', e => {
+      app.showReferenceOverlay = e.target.checked;
+      updateReferenceOverlay();
     });
 
     div.querySelector('#gcp-toggle').addEventListener('change', e => {

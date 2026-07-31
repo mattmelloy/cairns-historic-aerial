@@ -30,7 +30,17 @@
     body {
       display: flex;
       flex-direction: column;
+      /* Legacy fallback. Some mobile browsers treat 100vh as the screen height
+         behind their expanded toolbar, which can obscure bottom map controls. */
       height: 100vh;
+    }
+
+    /* Follow the genuinely visible viewport when browser chrome expands or
+       retracts. On desktop, and when mobile chrome is hidden, this equals 100vh. */
+    @supports (height: 100dvh) {
+      body {
+        height: 100dvh;
+      }
     }
 
     /* make the map fill the remaining space under the header */
@@ -907,9 +917,9 @@
   <script src="vendor/Control.Geocoder.min.js"></script>
 
   <!-- Layer manifest (plain script so the page works from file:// too) -->
-  <script src="layers.js?v=20260728a"></script>
+  <script src="layers.js?v=20260731a"></script>
 
   <!-- Main script -->
-  <script src="main.js?v=20260728a"></script>
+  <script src="main.js?v=20260731a"></script>
 </body>
 </html>

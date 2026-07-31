@@ -9,6 +9,30 @@ window.MAP_CONFIG = {
   "defaultZoom": 13,
   "layers": [
     {
+      "id": "tinaroo1949",
+      "name": "Lake Tinaroo 1949",
+      "timelineLabel": "Lake Tinaroo 1949",
+      "year": 1949,
+      "url": "https://filedn.com/lnwtRrhS2tTy2K4EooXWFnR/tiles/historic/Tinaroo1949/{z}/{x}/{y}.webp",
+      "scheme": "xyz",
+      "minZoom": 10,
+      "maxNativeZoom": 19,
+      "maxZoom": 19,
+      "bounds": [
+        [
+          -17.2757953,
+          145.4940544
+        ],
+        [
+          -17.1248666,
+          145.6419394
+        ]
+      ],
+      "referenceOverlayUrl": "tinaroo/reference/lake_tinaroo_and_dam_wall.geojson",
+      "referenceOverlayLabel": "Show Lake Tinaroo reservoir & dam wall",
+      "attribution": "Lake Tinaroo 1949 aerial imagery &mdash; Queensland Government QImagery; Lake Tinaroo and dam wall outline &copy; State of Queensland"
+    },
+    {
       "id": "cairns1952",
       "name": "Cairns 1952",
       "year": 1952,
