@@ -3,12 +3,12 @@
 // Features: year timeline, swipe compare, opacity blend, shareable URL hash,
 // address search, coverage outlines.
 
+const SITE_CONFIG = window.APP_CONFIG || {};
 // A proper 1×1 transparent GIF. Unlike a 1×1 PNG, browsers scale GIFs without
 // colour fringing, so tiles outside coverage render as fully invisible.
-const TRANSPARENT_TILE =
+const TRANSPARENT_TILE = SITE_CONFIG.TRANSPARENT_TILE ||
   'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
-
-const MAP_MAX_ZOOM = 21;
+const MAP_MAX_ZOOM = SITE_CONFIG.MAP_MAX_ZOOM || 21;
 
 // ---------------------------------------------------------------------------
 // Tile loading indicator
@@ -133,23 +133,12 @@ function historicLayerOptions(def) {
 // ---------------------------------------------------------------------------
 // Base layers
 // ---------------------------------------------------------------------------
-const BASE_LAYER_DEFS = [
-  {
-    id: 'esri',
-    name: 'Esri Imagery',
-    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    options: { maxZoom: MAP_MAX_ZOOM, attribution: 'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics' }
-  },
-  {
-    id: 'osm',
-    name: 'OpenStreetMap',
-    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-    options: { maxZoom: MAP_MAX_ZOOM, maxNativeZoom: 19, attribution: '&copy; OpenStreetMap contributors' }
-  }
-];
+const BASE_LAYER_DEFS = SITE_CONFIG.BASE_LAYER_DEFS || [];
 
 // ---------------------------------------------------------------------------
 // URL hash  (#zoom/lat/lng/layerId/baseId[/quadrants/layerId,...])
+// Quadrant IDs may be historic manifest IDs or base:<id> values such as
+// base:esri.
 // ---------------------------------------------------------------------------
 function parseHash() {
   const parts = window.location.hash.replace(/^#\/?/, '').split('/');
@@ -157,7 +146,11 @@ function parseHash() {
   const zoom = parseFloat(parts[0]);
   const lat = parseFloat(parts[1]);
   const lng = parseFloat(parts[2]);
-  if ([zoom, lat, lng].some(Number.isNaN)) return null;
+  if (![zoom, lat, lng].every(Number.isFinite) ||
+      zoom < 8 || zoom > MAP_MAX_ZOOM ||
+      lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    return null;
+  }
   return {
     zoom,
     center: [lat, lng],
@@ -198,12 +191,32 @@ const app = {
   quadrantLayerIds: null
 };
 
+const QUADRANT_BASE_PREFIX = SITE_CONFIG.QUADRANT_BASE_PREFIX || 'base:';
+const DEFAULT_QUADRANT_LAYER_IDS = SITE_CONFIG.DEFAULT_QUADRANT_LAYER_IDS || [
+  'cairns1952', 'cairns65', 'cairns1977', `${QUADRANT_BASE_PREFIX}esri`
+];
+
+function quadrantBaseId(id) {
+  return typeof id === 'string' && id.startsWith(QUADRANT_BASE_PREFIX)
+    ? id.slice(QUADRANT_BASE_PREFIX.length)
+    : null;
+}
+
+function quadrantBaseDef(id) {
+  const baseId = quadrantBaseId(id);
+  return baseId ? BASE_LAYER_DEFS.find(def => def.id === baseId) : null;
+}
+
+function isValidQuadrantId(id) {
+  return Boolean(app.layerDefs[id] || quadrantBaseDef(id));
+}
+
 function currentHistoricLayer() {
   return app.currentLayerId ? app.historicLayers[app.currentLayerId] : null;
 }
 
 function resetHistoricLoadState(layerId) {
-  app.historicLoadStates[layerId] = { loaded: 0, errors: 0, settled: false };
+  app.historicLoadStates[layerId] = { loaded: 0, errors: 0, requested: 0, settled: false };
   updateActiveLayerStatus();
 }
 
@@ -217,17 +230,22 @@ function updateActiveLayerStatus() {
   const def = app.layerDefs[app.currentLayerId];
   const state = app.historicLoadStates[app.currentLayerId];
   const covered = def && L.latLngBounds(def.bounds).contains(app.map.getCenter());
-  const unavailable = covered && state && state.settled &&
-    state.loaded === 0 && state.errors > 0;
+  const errorRatio = state && state.requested ? state.errors / state.requested : 0;
+  const unavailable = covered && state && state.settled && state.loaded === 0 && state.errors > 0;
+  const partial = covered && state && state.settled && state.errors > 0 && errorRatio >= 0.5;
 
-  notice.hidden = !unavailable;
-  if (!unavailable) return;
+  notice.hidden = !(unavailable || partial);
+  if (notice.hidden) return;
 
   const title = document.getElementById('layer-status-title');
   const detail = document.getElementById('layer-status-detail');
   const retry = document.getElementById('layer-status-retry');
-  if (title) title.textContent = `${def.name} tiles are unavailable`;
-  if (detail) detail.textContent = 'The historic imagery could not be loaded. The modern base map is still available.';
+  if (title) title.textContent = unavailable
+    ? `${def.name} tiles are unavailable`
+    : `${def.name} has missing tiles`;
+  if (detail) detail.textContent = unavailable
+    ? 'The historic imagery could not be loaded. The modern base map is still available.'
+    : 'Some historic tiles failed to load. Retry to request them again.';
   if (retry) retry.setAttribute('aria-label', `Retry loading ${def.name}`);
 }
 
@@ -245,9 +263,11 @@ function bindHistoricLayerState(layer, def) {
     });
     source.on('tileload', () => {
       app.historicLoadStates[def.id].loaded++;
+      app.historicLoadStates[def.id].requested++;
     });
     source.on('tileerror', () => {
       app.historicLoadStates[def.id].errors++;
+      app.historicLoadStates[def.id].requested++;
     });
     source.on('load', () => {
       settledSources.add(source);
@@ -264,6 +284,45 @@ function retryActiveHistoricLayer() {
   if (!layer || !app.currentLayerId) return;
   resetHistoricLoadState(app.currentLayerId);
   layer.redraw();
+}
+
+function createAddressGeocoder() {
+  const nominatim = L.Control.Geocoder.nominatim({
+    geocodingQueryParams: SITE_CONFIG.GEOCODER || {
+      countrycodes: 'au',
+      viewbox: '145.4,-17.1,146.1,-16.7',
+      bounded: 1,
+      limit: 5
+    }
+  });
+  const photon = L.Control.Geocoder.photon({
+    serviceUrl: SITE_CONFIG.PHOTON?.serviceUrl || 'https://photon.komoot.io/api/'
+  });
+  const fallbackQuery = query => `${query}, Cairns, Queensland, Australia`;
+
+  return {
+    geocode(query, callback, context) {
+      nominatim.geocode(query, results => {
+        if (Array.isArray(results) && results.length) {
+          callback.call(context, results);
+          return;
+        }
+        photon.geocode(fallbackQuery(query), callback, context);
+      }, context);
+    },
+    suggest(query, callback, context) {
+      this.geocode(query, callback, context);
+    },
+    reverse(latlng, callback, context) {
+      nominatim.reverse(latlng, results => {
+        if (Array.isArray(results) && results.length) {
+          callback.call(context, results);
+          return;
+        }
+        photon.reverse(latlng, callback, context);
+      }, context);
+    }
+  };
 }
 
 // Apply brightness/contrast as a CSS filter on the active historic layer's tile
@@ -433,7 +492,8 @@ function applyMode() {
 function updateQuadrantAttribution() {
   if (!app.quadrants || !app.quadrants.attribution) return;
   const attributions = app.quadrants.panes
-    .map(pane => app.layerDefs[pane.layerId]?.attribution)
+    .map(pane => app.layerDefs[pane.layerId]?.attribution ||
+      quadrantBaseDef(pane.layerId)?.options.attribution)
     .filter((value, index, values) => value && values.indexOf(value) === index);
   app.quadrants.attribution.innerHTML = [
     '<a href="https://leafletjs.com" target="_blank" rel="noopener noreferrer">Leaflet</a>',
@@ -444,11 +504,25 @@ function updateQuadrantAttribution() {
 
 function updatePaneNotices(pane) {
   const def = app.layerDefs[pane.layerId];
+  if (!def) {
+    pane.coverageNotice.hidden = true;
+    pane.availabilityNotice.hidden = true;
+    return;
+  }
   const covered = def && L.latLngBounds(def.bounds).contains(pane.map.getCenter());
   pane.coverageNotice.hidden = Boolean(covered);
-  const unavailable = covered && pane.tileState.settled &&
-    pane.tileState.loaded === 0 && pane.tileState.errors > 0;
-  pane.availabilityNotice.hidden = !unavailable;
+  const errorRatio = pane.tileState.requested
+    ? pane.tileState.errors / pane.tileState.requested
+    : 0;
+  const unavailable = covered && pane.tileState.settled && pane.tileState.loaded === 0 && pane.tileState.errors > 0;
+  const partial = covered && pane.tileState.settled && pane.tileState.errors > 0 && errorRatio >= 0.5;
+  pane.availabilityNotice.hidden = !(unavailable || partial);
+  const title = pane.availabilityNotice.querySelector('strong');
+  const detail = pane.availabilityNotice.querySelector('span');
+  if (title) title.textContent = unavailable ? 'Historic tiles unavailable' : 'Some tiles are missing';
+  if (detail) detail.textContent = unavailable
+    ? 'The imagery could not be loaded. Try again shortly.'
+    : 'Some imagery tiles failed to load. Try changing zoom or layer.';
 }
 
 function updateQuadrantCoverage() {
@@ -457,14 +531,19 @@ function updateQuadrantCoverage() {
 }
 
 function resetPaneTileState(pane) {
-  pane.tileState = { loaded: 0, errors: 0, settled: false };
+  pane.tileState = { loaded: 0, errors: 0, requested: 0, settled: false };
   updatePaneNotices(pane);
 }
 
 function setQuadrantLayer(pane, layerId) {
   const def = app.layerDefs[layerId];
-  if (!def) return;
+  const baseDef = quadrantBaseDef(layerId);
+  if (!def && !baseDef) return;
   if (pane.layer) pane.map.removeLayer(pane.layer);
+  if (pane.baseLayer) {
+    pane.map.removeLayer(pane.baseLayer);
+    pane.baseLayer = null;
+  }
   if (pane.coverageBoundary) {
     pane.map.removeLayer(pane.coverageBoundary);
     pane.coverageBoundary = null;
@@ -475,8 +554,17 @@ function setQuadrantLayer(pane, layerId) {
   }
   pane.layerId = layerId;
   resetPaneTileState(pane);
-  pane.layer = createHistoricLayer(def);
-  const sources = historicTileLayers(pane.layer);
+  pane.layer = null;
+  if (pane.mapElement) {
+    const label = baseDef ? `Current ${baseDef.name} map pane` : `Historic ${def.name} imagery pane`;
+    pane.mapElement.setAttribute('aria-label', label);
+  }
+  if (baseDef) {
+    pane.baseLayer = createTileLayer(baseDef.url, Object.assign({ keepBuffer: 2 }, baseDef.options));
+  } else {
+    pane.layer = createHistoricLayer(def);
+  }
+  const sources = pane.layer ? historicTileLayers(pane.layer) : [pane.baseLayer];
   const settledSources = new Set();
   sources.forEach(source => {
     source.on('loading', () => {
@@ -485,8 +573,14 @@ function setQuadrantLayer(pane, layerId) {
         resetPaneTileState(pane);
       }
     });
-    source.on('tileload', () => { pane.tileState.loaded++; });
-    source.on('tileerror', () => { pane.tileState.errors++; });
+    source.on('tileload', () => {
+      pane.tileState.loaded++;
+      pane.tileState.requested++;
+    });
+    source.on('tileerror', () => {
+      pane.tileState.errors++;
+      pane.tileState.requested++;
+    });
     source.on('load', () => {
       settledSources.add(source);
       if (settledSources.size === sources.length) {
@@ -495,9 +589,9 @@ function setQuadrantLayer(pane, layerId) {
       }
     });
   });
-  pane.layer.addTo(pane.map);
+  (pane.layer || pane.baseLayer).addTo(pane.map);
   updatePaneReferenceOverlay(pane, def);
-  if (def.showBoundaryInQuadrants) {
+  if (def?.showBoundaryInQuadrants) {
     pane.coverageBoundary = L.rectangle(def.bounds, {
       color: def.boundaryColor || '#06b6d4',
       weight: 3,
@@ -543,10 +637,18 @@ function enterQuadrantMode() {
 
   const currentView = { center: app.map.getCenter(), zoom: app.map.getZoom() };
   const defs = app.manifest.layers;
-  const requestedIds = (app.quadrantLayerIds || []).filter(id => app.layerDefs[id]);
-  const selectedIds = [...requestedIds, app.currentLayerId, ...defs.map(def => def.id)]
+  const requestedIds = (app.quadrantLayerIds || []).filter(isValidQuadrantId);
+  const defaults = requestedIds.length ? requestedIds : DEFAULT_QUADRANT_LAYER_IDS;
+  const selectedIds = [...defaults, ...defs.map(def => def.id)]
     .filter((id, index, ids) => id && ids.indexOf(id) === index)
     .slice(0, 4);
+
+  const currentOptions = BASE_LAYER_DEFS.map(def =>
+    `<option value="${QUADRANT_BASE_PREFIX}${def.id}">Current — ${def.name}</option>`
+  ).join('');
+  const historicOptions = defs.map(def =>
+    `<option value="${def.id}">${def.name}</option>`
+  ).join('');
 
   const container = document.createElement('section');
   container.className = 'quadrant-view';
@@ -554,6 +656,7 @@ function enterQuadrantMode() {
   container.innerHTML = `
     <div class="quadrant-toolbar">
       <span>Four-panel comparison</span>
+      <button type="button" class="location-control-button quadrant-location" title="Find my location" aria-label="Find my location"></button>
       <button type="button" class="quadrant-exit" title="Return to single-map view" aria-label="Return to single-map view">&times;</button>
     </div>
     <div class="quadrant-grid"></div>
@@ -568,9 +671,10 @@ function enterQuadrantMode() {
     paneEl.innerHTML = `
       <div class="quadrant-pane-map" aria-label="Historic imagery pane ${index + 1}"></div>
       <label class="quadrant-select-wrap">
-        <span class="sr-only">Historic imagery for pane ${index + 1}</span>
+        <span class="sr-only">Map layer for pane ${index + 1}</span>
         <select class="quadrant-select">
-          ${defs.map(def => `<option value="${def.id}">${def.name}</option>`).join('')}
+          <optgroup label="Current maps">${currentOptions}</optgroup>
+          <optgroup label="Historic imagery">${historicOptions}</optgroup>
         </select>
       </label>
       <div class="quadrant-coverage-notice" role="status" aria-live="polite" hidden>
@@ -596,15 +700,17 @@ function enterQuadrantMode() {
     L.control.zoom({ position: 'bottomleft' }).addTo(map);
     const pane = {
       map,
+      mapElement: paneEl.querySelector('.quadrant-pane-map'),
       layerId,
       layer: null,
+      baseLayer: null,
       coverageBoundary: null,
       referenceOverlay: null,
       referenceOverlayRequest: 0,
       select: paneEl.querySelector('.quadrant-select'),
       coverageNotice: paneEl.querySelector('.quadrant-coverage-notice'),
       availabilityNotice: paneEl.querySelector('.quadrant-availability-notice'),
-      tileState: { loaded: 0, errors: 0, settled: false }
+      tileState: { loaded: 0, errors: 0, requested: 0, settled: false }
     };
     pane.select.addEventListener('change', event => setQuadrantLayer(pane, event.target.value));
     L.DomEvent.disableClickPropagation(paneEl.querySelector('.quadrant-select-wrap'));
@@ -626,6 +732,12 @@ function enterQuadrantMode() {
   };
   app.quadrantLayerIds = panes.map(pane => pane.layerId);
   window.addEventListener('resize', resizeHandler);
+
+  const quadrantLocationButton = container.querySelector('.quadrant-location');
+  if (quadrantLocationButton) {
+    bindLocationButton(quadrantLocationButton);
+    L.DomEvent.disableClickPropagation(quadrantLocationButton);
+  }
 
   container.querySelector('.quadrant-exit').addEventListener('click', () => {
     app.mode = 'overlay';
@@ -659,13 +771,18 @@ function updateFootprint() {
 
 function loadReferenceOverlay(url) {
   if (!app.referenceOverlayCache.has(url)) {
-    const request = fetch(url).then(response => {
-      if (!response.ok) throw new Error(`Could not load reference overlay (${response.status})`);
-      return response.json();
-    }).catch(error => {
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    const timeout = window.setTimeout(() => controller?.abort(), 10000);
+    const request = fetch(url, controller ? { signal: controller.signal } : undefined)
+      .then(response => {
+        if (!response.ok) throw new Error(`Could not load reference overlay (${response.status})`);
+        return response.json();
+      })
+      .finally(() => window.clearTimeout(timeout))
+      .catch(error => {
       app.referenceOverlayCache.delete(url);
       throw error;
-    });
+      });
     app.referenceOverlayCache.set(url, request);
   }
   return app.referenceOverlayCache.get(url);
@@ -736,7 +853,7 @@ async function updatePaneReferenceOverlay(pane, def) {
     pane.map.removeLayer(pane.referenceOverlay);
     pane.referenceOverlay = null;
   }
-  if (!def.referenceOverlayUrl) return;
+  if (!def?.referenceOverlayUrl) return;
 
   try {
     const collection = await loadReferenceOverlay(def.referenceOverlayUrl);
@@ -781,7 +898,7 @@ function selectHistoricLayer(layerId) {
   });
   const label = document.getElementById('timeline-label');
   if (label) {
-    label.textContent = layer ? app.layerDefs[app.currentLayerId].name : 'Modern imagery';
+    label.textContent = layer ? app.layerDefs[app.currentLayerId].name : 'Historic imagery maps';
   }
 
   updateReferenceOverlayControl();
@@ -828,7 +945,7 @@ function createTimeline(manifest) {
     (yearCounts[def.year] > 1 ? def.name : String(def.year));
 
   wrap.innerHTML = `
-    <div class="timeline-label" id="timeline-label" aria-live="polite">Modern imagery</div>
+    <div class="timeline-label" id="timeline-label" aria-live="polite">Historic imagery maps</div>
     <div class="timeline-track" role="group" aria-label="Historic imagery layer">
       ${sorted.map(def => `
         <button type="button" class="timeline-chip" data-id="${def.id}" title="${def.name}" aria-pressed="false">${chipLabel(def)}</button>
@@ -1001,6 +1118,153 @@ function createCoordReadout() {
   return control;
 }
 
+let locationStatusTimer = null;
+
+function showLocationStatus(message, isError = false) {
+  const status = document.getElementById('location-status');
+  if (!status) return;
+  status.textContent = message;
+  status.classList.toggle('error', isError);
+  status.hidden = false;
+  if (locationStatusTimer) window.clearTimeout(locationStatusTimer);
+  locationStatusTimer = window.setTimeout(() => {
+    status.hidden = true;
+  }, isError ? 7000 : 4500);
+}
+
+function activeLocationMap() {
+  if (app.mode === 'quadrants' && app.quadrants?.panes?.[0]?.map) {
+    return app.quadrants.panes[0].map;
+  }
+  return app.map;
+}
+
+function locationButtonMarkup() {
+  return '<svg viewBox="0 0 24 24" data-icon="location-arrow" aria-hidden="true">' +
+    '<path fill="currentColor" d="M20.65 2.65 3.54 9.94c-.92.39-.83 1.72.14 1.99l6.91 1.92 1.92 6.91c.27.97 1.6 1.06 1.99.14l7.29-17.11c.34-.79-.36-1.49-1.14-1.14Zm-7.03 15.07-1.38-4.96a1.05 1.05 0 0 0-.73-.73l-4.96-1.38 12.31-5.24-5.24 12.31Z"></path>' +
+    '</svg>';
+}
+
+function resetLocationButton(button) {
+  button.disabled = false;
+  button.classList.remove('is-locating');
+  button.removeAttribute('aria-busy');
+}
+
+function requestUserLocation(button) {
+  if (!navigator.geolocation) {
+    showLocationStatus('Location detection is not available in this browser.', true);
+    return;
+  }
+
+  button.disabled = true;
+  button.classList.add('is-locating');
+  button.setAttribute('aria-busy', 'true');
+  showLocationStatus('Finding your location… It is used only to centre this map and is not stored.');
+
+  navigator.geolocation.getCurrentPosition(position => {
+    const map = activeLocationMap();
+    if (!map) {
+      resetLocationButton(button);
+      return;
+    }
+    const { latitude, longitude, accuracy } = position.coords;
+    const zoom = Math.min(MAP_MAX_ZOOM, 18);
+    map.setView([latitude, longitude], zoom, { animate: true });
+    const accuracyText = Number.isFinite(accuracy)
+      ? ` (accuracy ±${Math.round(accuracy)} m)`
+      : '';
+    showLocationStatus(`Location found${accuracyText}.`);
+    resetLocationButton(button);
+  }, error => {
+    const message = error.code === 1
+      ? 'Location access was denied. Please allow it in your browser settings.'
+      : error.code === 2
+        ? 'Your location could not be determined.'
+        : 'Location detection timed out. Please try again.';
+    showLocationStatus(message, true);
+    resetLocationButton(button);
+  }, {
+    enableHighAccuracy: true,
+    maximumAge: 30000,
+    timeout: 10000
+  });
+}
+
+function bindLocationButton(button) {
+  button.type = 'button';
+  button.title = 'Use your location to centre the map (not stored)';
+  button.setAttribute('aria-label', 'Use your location to centre the map (not stored)');
+  button.innerHTML = locationButtonMarkup();
+  button.addEventListener('click', () => requestUserLocation(button));
+}
+
+function createLocationControl() {
+  const control = L.control({ position: 'topleft' });
+
+  control.onAdd = function () {
+    const div = L.DomUtil.create('div', 'leaflet-bar location-control');
+    const button = L.DomUtil.create('button', 'location-control-button', div);
+    bindLocationButton(button);
+
+    L.DomEvent.disableClickPropagation(div);
+    L.DomEvent.disableScrollPropagation(div);
+    return div;
+  };
+
+  return control;
+}
+
+function createShareControl() {
+  const control = L.control({ position: 'topleft' });
+  control.onAdd = function () {
+    const div = L.DomUtil.create('div', 'leaflet-bar share-control');
+    const button = L.DomUtil.create('button', 'share-control-button', div);
+    button.type = 'button';
+    button.title = 'Copy a link to this map view';
+    button.setAttribute('aria-label', 'Copy a link to this map view');
+    button.innerHTML = '<svg viewBox="0 0 24 24" data-icon="share" aria-hidden="true">' +
+      '<path d="M12 15V3"></path>' +
+      '<path d="m7.75 7.25 4.25-4.25 4.25 4.25"></path>' +
+      '<path d="M8 10H6.5A2.5 2.5 0 0 0 4 12.5v6A2.5 2.5 0 0 0 6.5 21h11a2.5 2.5 0 0 0 2.5-2.5v-6a2.5 2.5 0 0 0-2.5-2.5H16"></path>' +
+      '</svg>';
+    button.addEventListener('click', () => {
+      updateHash();
+      copyToClipboard(window.location.href).then(ok => {
+        showLocationStatus(ok ? 'Share link copied to the clipboard.' :
+          'Copy failed. You can copy the map URL from your browser address bar.', !ok);
+      });
+    });
+    L.DomEvent.disableClickPropagation(div);
+    L.DomEvent.disableScrollPropagation(div);
+    return div;
+  };
+  return control;
+}
+
+function groupMapToolControls() {
+  const corner = app.map?.getContainer().querySelector('.leaflet-top.leaflet-left');
+  if (!corner || corner.querySelector('.map-tool-panel')) return;
+
+  const controls = [
+    corner.querySelector('.leaflet-control-zoom'),
+    corner.querySelector('.location-control'),
+    corner.querySelector('.share-control'),
+    corner.querySelector('.leaflet-control-geocoder'),
+    corner.querySelector('.opacity-slider-container')
+  ].filter(Boolean);
+  if (!controls.length) return;
+
+  const panel = L.DomUtil.create('div', 'map-tool-panel leaflet-control');
+  panel.setAttribute('role', 'toolbar');
+  panel.setAttribute('aria-label', 'Map tools');
+  panel.setAttribute('aria-orientation', 'vertical');
+  corner.insertBefore(panel, corner.firstChild);
+  controls.forEach(control => panel.appendChild(control));
+  L.DomEvent.disableClickPropagation(panel);
+  L.DomEvent.disableScrollPropagation(panel);
+}
+
 function copyToClipboard(text) {
   if (navigator.clipboard && navigator.clipboard.writeText) {
     return navigator.clipboard.writeText(text).then(() => true, () => false);
@@ -1064,12 +1328,19 @@ function setupGcpPicker() {
 }
 
 function createOpacitySlider() {
-  const control = L.control({ position: 'bottomleft' });
+  const control = L.control({ position: 'topleft' });
 
   control.onAdd = function () {
     const div = L.DomUtil.create('div', 'opacity-slider-container');
     div.innerHTML = `
-      <button type="button" id="opacity-toggle" class="opacity-toggle" aria-label="Open image enhancement controls" aria-expanded="false" aria-controls="image-enhancement-controls"><span>Image</span><span>Enhancement</span></button>
+      <button type="button" id="opacity-toggle" class="opacity-toggle" title="Image enhancement" aria-label="Open image enhancement controls" aria-expanded="false" aria-controls="image-enhancement-controls">
+        <svg viewBox="0 0 24 24" data-icon="image-enhancement" aria-hidden="true">
+          <path d="M4 6h5M15 6h5M4 12h9M17 12h3M4 18h2M10 18h10"></path>
+          <circle cx="12" cy="6" r="2"></circle>
+          <circle cx="15" cy="12" r="2"></circle>
+          <circle cx="8" cy="18" r="2"></circle>
+        </svg>
+      </button>
       <div class="opacity-controls" id="image-enhancement-controls">
         <div class="range-heading">
           <label class="opacity-label" for="opacity-slider">Historic Overlay Opacity</label>
@@ -1121,6 +1392,18 @@ async function init() {
       'Make sure <code>layers.js</code> sits next to <code>index.html</code> and loads before <code>main.js</code>.</p>';
     return;
   }
+  const validation = window.validateMapManifest
+    ? window.validateMapManifest(manifest)
+    : { valid: false, errors: ['manifest-validation.js did not load'] };
+  if (!validation.valid) {
+    console.error('Invalid map configuration:', validation.errors);
+    document.getElementById('map').innerHTML =
+      '<div class="configuration-error" role="alert">' +
+      '<strong>Map configuration needs attention.</strong>' +
+      '<span>Some imagery layers could not be started. Please report this message to the site owner.</span>' +
+      '</div>';
+    return;
+  }
   app.manifest = manifest;
 
   // Build layers from the manifest
@@ -1156,6 +1439,8 @@ async function init() {
   createLayerControl().addTo(app.map);
   createOpacitySlider().addTo(app.map);
   createCoordReadout().addTo(app.map);
+  createLocationControl().addTo(app.map);
+  createShareControl().addTo(app.map);
   createTimeline(manifest);
   createSwipeDivider();
   setupGcpPicker();
@@ -1163,17 +1448,19 @@ async function init() {
   const layerStatusRetry = document.getElementById('layer-status-retry');
   if (layerStatusRetry) layerStatusRetry.addEventListener('click', retryActiveHistoricLayer);
 
-  // Address search (Nominatim), biased towards the map area
+  // Address search uses bounded Nominatim first, with Photon as a fallback for
+  // transient failures or empty results. A hosted proxy/provider is preferred
+  // if traffic grows beyond occasional interactive use.
   if (L.Control.geocoder) {
     L.Control.geocoder({
       position: 'topleft',
       defaultMarkGeocode: true,
       placeholder: 'Search address…',
-      geocoder: L.Control.Geocoder.nominatim({
-        geocodingQueryParams: { countrycodes: 'au', viewbox: '145.4,-17.1,146.1,-16.7' }
-      })
+      errorMessage: 'Address search is temporarily unavailable. Please try again or pan the map.',
+      geocoder: createAddressGeocoder()
     }).addTo(app.map);
   }
+  groupMapToolControls();
 
   // Opacity slider wiring
   const slider = document.getElementById('opacity-slider');
