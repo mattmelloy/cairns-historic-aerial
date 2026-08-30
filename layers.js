@@ -157,6 +157,27 @@ window.MAP_CONFIG = {
       "attribution": "Cairns 1977 &mdash; Queensland Government QImagery"
     },
     {
+      "id": "cairns1978",
+      "name": "Cairns 1978",
+      "timelineLabel": "1978",
+      "year": 1978,
+      "url": "https://tiles.melloy.bid/tiles/cairns1978_aws_native_affine_z20_q95/{z}/{x}/{y}.webp",
+      "scheme": "xyz",
+      "minZoom": 10,
+      "maxNativeZoom": 20,
+      "bounds": [
+        [
+          -16.9523228,
+          145.655892
+        ],
+        [
+          -16.7278504,
+          145.8184037
+        ]
+      ],
+      "attribution": "Cairns 1978 &mdash; GCP affine-aligned to Esri World Imagery &mdash; Queensland Government QImagery"
+    },
+    {
       "id": "cairns1983",
       "name": "Cairns 1983",
       "timelineLabel": "1983",

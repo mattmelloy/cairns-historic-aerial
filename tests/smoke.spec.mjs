@@ -25,13 +25,26 @@ test('starts cleanly and exposes the historic imagery maps timeline', async ({ p
   await expect(page.locator('#timeline-label')).toHaveText('Historic imagery maps');
   await expect(page.getByRole('toolbar', { name: 'Map tools' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Copy a link to this map view' })).toBeVisible();
-  await expect(page.locator('.timeline-chip')).toHaveCount(10);
+  await expect(page.locator('.timeline-chip')).toHaveCount(11);
+  await expect(page.getByRole('button', { name: '1978', exact: true })).toBeVisible();
   expect(issues).toEqual({ pageErrors: [], consoleErrors: [], failedLocalRequests: [] });
   expect(await page.evaluate(() => window.validateMapManifest(window.MAP_CONFIG).valid)).toBe(true);
   expect(await page.evaluate(() => window.MAP_CONFIG.layers.every(layer => {
     const urls = layer.tileUrls || [layer.url];
     return urls.every(url => /^https?:\/\//.test(url));
   }))).toBe(true);
+  expect(await page.evaluate(() => {
+    const layer = window.MAP_CONFIG.layers.find(item => item.id === 'cairns1978');
+    return layer && {
+      timelineLabel: layer.timelineLabel,
+      maxNativeZoom: layer.maxNativeZoom,
+      url: layer.url
+    };
+  })).toEqual({
+    timelineLabel: '1978',
+    maxNativeZoom: 20,
+    url: 'https://tiles.melloy.bid/tiles/cairns1978_aws_native_affine_z20_q95/{z}/{x}/{y}.webp'
+  });
 });
 
 test('keeps every left-side map tool in one consistent control rail', async ({ page }) => {
