@@ -116,6 +116,30 @@ test('reports a failed historic tile batch and leaves the base map available', a
   await expect(page.getByRole('button', { name: /Retry loading Cairns 1952/ })).toBeVisible();
 });
 
+test('silently enlarges historic imagery above its native zoom level', async ({ page }) => {
+  await page.route('https://filedn.com/**', route => route.abort());
+  await openMap(page, '#21/-16.92030/145.77100/cairns1952/esri');
+
+  await expect.poll(() => page.evaluate(() =>
+    window._app.historicLoadStates.cairns1952.settled
+  )).toBe(true);
+  await expect(page.locator('#layer-status')).toBeHidden();
+  expect(await page.evaluate(() => window._app.historicLayers.tinaroo1949.options.maxZoom)).toBe(21);
+});
+
+test('keeps overzoomed quadrant panes free of missing-tile warnings', async ({ page }) => {
+  await page.route('https://filedn.com/**', route => route.abort());
+  await openMap(
+    page,
+    '#21/-16.92030/145.77100/cairns1952/esri/quadrants/cairns1952,cairns65,cairns1977,base:esri'
+  );
+
+  await expect.poll(() => page.evaluate(() =>
+    window._app.quadrants.panes.slice(0, 3).every(pane => pane.tileState.settled)
+  )).toBe(true);
+  await expect(page.locator('.quadrant-availability-notice:visible')).toHaveCount(0);
+});
+
 test('keeps mobile controls at touch-friendly sizes', async ({ page }) => {
   await openMap(page);
   test.skip((await page.evaluate(() => window.innerWidth)) > 600, 'mobile viewport only');

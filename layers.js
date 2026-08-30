@@ -17,7 +17,7 @@ window.MAP_CONFIG = {
       "scheme": "xyz",
       "minZoom": 10,
       "maxNativeZoom": 19,
-      "maxZoom": 19,
+      "maxZoom": 21,
       "bounds": [
         [
           -17.2757953,

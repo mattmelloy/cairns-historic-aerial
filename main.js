@@ -215,6 +215,10 @@ function currentHistoricLayer() {
   return app.currentLayerId ? app.historicLayers[app.currentLayerId] : null;
 }
 
+function isIntentionalOverzoom(map, def) {
+  return Boolean(map && Number.isFinite(def?.maxNativeZoom) && map.getZoom() > def.maxNativeZoom);
+}
+
 function resetHistoricLoadState(layerId) {
   app.historicLoadStates[layerId] = { loaded: 0, errors: 0, requested: 0, settled: false };
   updateActiveLayerStatus();
@@ -230,11 +234,15 @@ function updateActiveLayerStatus() {
   const def = app.layerDefs[app.currentLayerId];
   const state = app.historicLoadStates[app.currentLayerId];
   const covered = def && L.latLngBounds(def.bounds).contains(app.map.getCenter());
+  const overzoomed = isIntentionalOverzoom(app.map, def);
   const errorRatio = state && state.requested ? state.errors / state.requested : 0;
   const unavailable = covered && state && state.settled && state.loaded === 0 && state.errors > 0;
   const partial = covered && state && state.settled && state.errors > 0 && errorRatio >= 0.5;
 
-  notice.hidden = !(unavailable || partial);
+  // Above the native tile ceiling, Leaflet deliberately enlarges the last
+  // available level. Missing requests at that scale are not an outage and
+  // should not interrupt exploration with a retry warning.
+  notice.hidden = overzoomed || !(unavailable || partial);
   if (notice.hidden) return;
 
   const title = document.getElementById('layer-status-title');
@@ -510,13 +518,14 @@ function updatePaneNotices(pane) {
     return;
   }
   const covered = def && L.latLngBounds(def.bounds).contains(pane.map.getCenter());
+  const overzoomed = isIntentionalOverzoom(pane.map, def);
   pane.coverageNotice.hidden = Boolean(covered);
   const errorRatio = pane.tileState.requested
     ? pane.tileState.errors / pane.tileState.requested
     : 0;
   const unavailable = covered && pane.tileState.settled && pane.tileState.loaded === 0 && pane.tileState.errors > 0;
   const partial = covered && pane.tileState.settled && pane.tileState.errors > 0 && errorRatio >= 0.5;
-  pane.availabilityNotice.hidden = !(unavailable || partial);
+  pane.availabilityNotice.hidden = overzoomed || !(unavailable || partial);
   const title = pane.availabilityNotice.querySelector('strong');
   const detail = pane.availabilityNotice.querySelector('span');
   if (title) title.textContent = unavailable ? 'Historic tiles unavailable' : 'Some tiles are missing';
