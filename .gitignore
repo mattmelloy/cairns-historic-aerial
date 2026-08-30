@@ -11,6 +11,11 @@ Thumbs.db
 # Vercel
 .vercel/
 
+# Node / Playwright local installs and reports
+node_modules/
+playwright-report/
+test-results/
+
 # Logs / env
 *.log
 .env
