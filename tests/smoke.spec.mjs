@@ -125,22 +125,22 @@ test('reports a failed historic tile batch and leaves the base map available', a
   await openMap(page);
   await page.getByRole('button', { name: '1952' }).evaluate(button => button.click());
   await expect(page.locator('#layer-status')).toBeVisible({ timeout: 10_000 });
-  await expect(page.locator('#layer-status-detail')).toContainText('historic tiles failed to load');
+  await expect(page.locator('#layer-status-title')).toHaveText('Imagery unavailable here');
   await expect(page.getByRole('button', { name: /Retry loading Cairns 1952/ })).toBeVisible();
 });
 
-test('silently enlarges historic imagery above its native zoom level', async ({ page }) => {
+test('still offers retry for a genuine total loading failure above native zoom', async ({ page }) => {
   await page.route('https://filedn.com/**', route => route.abort());
   await openMap(page, '#21/-16.92030/145.77100/cairns1952/esri');
 
   await expect.poll(() => page.evaluate(() =>
     window._app.historicLoadStates.cairns1952.settled
   )).toBe(true);
-  await expect(page.locator('#layer-status')).toBeHidden();
+  await expect(page.locator('#layer-status')).toBeVisible();
   expect(await page.evaluate(() => window._app.historicLayers.tinaroo1949.options.maxZoom)).toBe(21);
 });
 
-test('keeps overzoomed quadrant panes free of missing-tile warnings', async ({ page }) => {
+test('offers compact retry controls for failed overzoomed quadrant panes', async ({ page }) => {
   await page.route('https://filedn.com/**', route => route.abort());
   await openMap(
     page,
@@ -150,7 +150,7 @@ test('keeps overzoomed quadrant panes free of missing-tile warnings', async ({ p
   await expect.poll(() => page.evaluate(() =>
     window._app.quadrants.panes.slice(0, 3).every(pane => pane.tileState.settled)
   )).toBe(true);
-  await expect(page.locator('.quadrant-availability-notice:visible')).toHaveCount(0);
+  await expect(page.locator('.quadrant-availability-notice:visible')).toHaveCount(3);
 });
 
 test('keeps mobile controls at touch-friendly sizes', async ({ page }) => {

@@ -34,11 +34,9 @@
 
   <!-- Active historic layer availability -->
   <div id="layer-status" class="layer-status" role="status" aria-live="polite" aria-atomic="true" hidden>
-    <div class="layer-status-copy">
-      <strong id="layer-status-title">Historic tiles are unavailable</strong>
-      <span id="layer-status-detail">The historic imagery could not be loaded.</span>
-    </div>
-    <button type="button" id="layer-status-retry">Retry</button>
+    <strong id="layer-status-title">Imagery unavailable here</strong>
+    <button type="button" id="layer-status-retry" data-tile-retry>Retry</button>
+    <button type="button" id="layer-status-dismiss" data-tile-dismiss aria-label="Dismiss imagery notice">×</button>
   </div>
 
   <!-- Splash Screen -->
@@ -74,6 +72,7 @@
   <script src="layers.js"></script>
 
   <!-- Main script -->
+  <script src="tile-health.js"></script>
   <script src="main.js"></script>
 </body>
 </html>
