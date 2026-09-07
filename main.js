@@ -170,7 +170,7 @@ const app = {
   manifest: null,
   baseLayers: {},          // id -> L.TileLayer
   historicLayers: {},      // id -> L.TileLayer
-  historicLoadStates: {},  // id -> current tile batch state
+  historicLoadStates: {},  // id -> visible tile health
   layerDefs: {},           // id -> manifest entry
   currentBaseId: 'esri',
   currentLayerId: null,
@@ -215,83 +215,39 @@ function currentHistoricLayer() {
   return app.currentLayerId ? app.historicLayers[app.currentLayerId] : null;
 }
 
-function isIntentionalOverzoom(map, def) {
-  return Boolean(map && Number.isFinite(def?.maxNativeZoom) && map.getZoom() > def.maxNativeZoom);
-}
-
-function resetHistoricLoadState(layerId) {
-  app.historicLoadStates[layerId] = { loaded: 0, errors: 0, requested: 0, settled: false };
-  updateActiveLayerStatus();
+function renderTileNotice(notice, state, name) {
+  notice.hidden = !state?.kind || state.dismissed;
+  if (notice.hidden) return;
+  const coverage = state.kind === 'coverage';
+  notice.dataset.kind = state.kind;
+  notice.querySelector('strong').textContent = coverage ? 'No imagery here'
+    : state.kind === 'failed' ? 'Imagery loading issue' : 'Imagery unavailable here';
+  notice.title = coverage
+    ? `${name}: this location may be outside the photographed area.`
+    : `${name}: imagery could not be loaded at this location. Retry or try another area or year.`;
+  const retry = notice.querySelector('[data-tile-retry]');
+  retry.hidden = coverage;
+  retry.setAttribute('aria-label', `Retry loading ${name}`);
 }
 
 function updateActiveLayerStatus() {
   const notice = document.getElementById('layer-status');
-  if (!notice || !app.map || !app.currentLayerId) {
-    if (notice) notice.hidden = true;
+  if (!notice) return;
+  if (!app.map || !app.currentLayerId || app.mode === 'quadrants') {
+    notice.hidden = true;
     return;
   }
-
-  const def = app.layerDefs[app.currentLayerId];
-  const state = app.historicLoadStates[app.currentLayerId];
-  const covered = def && L.latLngBounds(def.bounds).contains(app.map.getCenter());
-  const overzoomed = isIntentionalOverzoom(app.map, def);
-  const errorRatio = state && state.requested ? state.errors / state.requested : 0;
-  const unavailable = covered && state && state.settled && state.loaded === 0 && state.errors > 0;
-  const partial = covered && state && state.settled && state.errors > 0 && errorRatio >= 0.5;
-
-  // Above the native tile ceiling, Leaflet deliberately enlarges the last
-  // available level. Missing requests at that scale are not an outage and
-  // should not interrupt exploration with a retry warning.
-  notice.hidden = overzoomed || !(unavailable || partial);
-  if (notice.hidden) return;
-
-  const title = document.getElementById('layer-status-title');
-  const detail = document.getElementById('layer-status-detail');
-  const retry = document.getElementById('layer-status-retry');
-  if (title) title.textContent = unavailable
-    ? `${def.name} tiles are unavailable`
-    : `${def.name} has missing tiles`;
-  if (detail) detail.textContent = unavailable
-    ? 'The historic imagery could not be loaded. The modern base map is still available.'
-    : 'Some historic tiles failed to load. Retry to request them again.';
-  if (retry) retry.setAttribute('aria-label', `Retry loading ${def.name}`);
+  renderTileNotice(notice, app.historicLoadStates[app.currentLayerId], app.layerDefs[app.currentLayerId].name);
 }
 
 function bindHistoricLayerState(layer, def) {
-  resetHistoricLoadState(def.id);
-  const sources = historicTileLayers(layer);
-  const settledSources = new Set();
-
-  sources.forEach(source => {
-    source.on('loading', () => {
-      if (settledSources.size === sources.length) {
-        settledSources.clear();
-        resetHistoricLoadState(def.id);
-      }
-    });
-    source.on('tileload', () => {
-      app.historicLoadStates[def.id].loaded++;
-      app.historicLoadStates[def.id].requested++;
-    });
-    source.on('tileerror', () => {
-      app.historicLoadStates[def.id].errors++;
-      app.historicLoadStates[def.id].requested++;
-    });
-    source.on('load', () => {
-      settledSources.add(source);
-      if (settledSources.size === sources.length) {
-        app.historicLoadStates[def.id].settled = true;
-        updateActiveLayerStatus();
-      }
-    });
-  });
+  app.historicLoadStates[def.id] = window.monitorHistoricTiles(
+    layer, app.map, historicTileLayers(layer), updateActiveLayerStatus
+  );
 }
 
 function retryActiveHistoricLayer() {
-  const layer = currentHistoricLayer();
-  if (!layer || !app.currentLayerId) return;
-  resetHistoricLoadState(app.currentLayerId);
-  layer.redraw();
+  app.historicLoadStates[app.currentLayerId]?.retry();
 }
 
 function createAddressGeocoder() {
@@ -492,6 +448,7 @@ function applyMode() {
     if (opVal) opVal.style.display = showOp;
   }
   updateSwipe();
+  updateActiveLayerStatus();
 }
 
 // ---------------------------------------------------------------------------
@@ -517,31 +474,15 @@ function updatePaneNotices(pane) {
     pane.availabilityNotice.hidden = true;
     return;
   }
-  const covered = def && L.latLngBounds(def.bounds).contains(pane.map.getCenter());
-  const overzoomed = isIntentionalOverzoom(pane.map, def);
-  pane.coverageNotice.hidden = Boolean(covered);
-  const errorRatio = pane.tileState.requested
-    ? pane.tileState.errors / pane.tileState.requested
-    : 0;
-  const unavailable = covered && pane.tileState.settled && pane.tileState.loaded === 0 && pane.tileState.errors > 0;
-  const partial = covered && pane.tileState.settled && pane.tileState.errors > 0 && errorRatio >= 0.5;
-  pane.availabilityNotice.hidden = overzoomed || !(unavailable || partial);
-  const title = pane.availabilityNotice.querySelector('strong');
-  const detail = pane.availabilityNotice.querySelector('span');
-  if (title) title.textContent = unavailable ? 'Historic tiles unavailable' : 'Some tiles are missing';
-  if (detail) detail.textContent = unavailable
-    ? 'The imagery could not be loaded. Try again shortly.'
-    : 'Some imagery tiles failed to load. Try changing zoom or layer.';
+  const covered = L.latLngBounds(def.bounds).contains(pane.map.getCenter());
+  pane.coverageNotice.hidden = covered;
+  renderTileNotice(pane.availabilityNotice, pane.tileState, def.name);
+  if (!covered) pane.availabilityNotice.hidden = true;
 }
 
 function updateQuadrantCoverage() {
   if (!app.quadrants) return;
   app.quadrants.panes.forEach(updatePaneNotices);
-}
-
-function resetPaneTileState(pane) {
-  pane.tileState = { loaded: 0, errors: 0, requested: 0, settled: false };
-  updatePaneNotices(pane);
 }
 
 function setQuadrantLayer(pane, layerId) {
@@ -562,7 +503,7 @@ function setQuadrantLayer(pane, layerId) {
     pane.referenceOverlay = null;
   }
   pane.layerId = layerId;
-  resetPaneTileState(pane);
+  pane.tileState = null;
   pane.layer = null;
   if (pane.mapElement) {
     const label = baseDef ? `Current ${baseDef.name} map pane` : `Historic ${def.name} imagery pane`;
@@ -574,30 +515,9 @@ function setQuadrantLayer(pane, layerId) {
     pane.layer = createHistoricLayer(def);
   }
   const sources = pane.layer ? historicTileLayers(pane.layer) : [pane.baseLayer];
-  const settledSources = new Set();
-  sources.forEach(source => {
-    source.on('loading', () => {
-      if (settledSources.size === sources.length) {
-        settledSources.clear();
-        resetPaneTileState(pane);
-      }
-    });
-    source.on('tileload', () => {
-      pane.tileState.loaded++;
-      pane.tileState.requested++;
-    });
-    source.on('tileerror', () => {
-      pane.tileState.errors++;
-      pane.tileState.requested++;
-    });
-    source.on('load', () => {
-      settledSources.add(source);
-      if (settledSources.size === sources.length) {
-        pane.tileState.settled = true;
-        updatePaneNotices(pane);
-      }
-    });
-  });
+  pane.tileState = window.monitorHistoricTiles(
+    pane.layer || pane.baseLayer, pane.map, sources, () => updatePaneNotices(pane)
+  );
   (pane.layer || pane.baseLayer).addTo(pane.map);
   updatePaneReferenceOverlay(pane, def);
   if (def?.showBoundaryInQuadrants) {
@@ -687,12 +607,12 @@ function enterQuadrantMode() {
         </select>
       </label>
       <div class="quadrant-coverage-notice" role="status" aria-live="polite" hidden>
-        <strong>No imagery at this location</strong>
-        <span>This survey does not cover the map centre.</span>
+        <strong>Outside survey area</strong>
       </div>
       <div class="quadrant-availability-notice" role="status" aria-live="polite" hidden>
-        <strong>Historic tiles unavailable</strong>
-        <span>The imagery could not be loaded. Try again shortly.</span>
+        <strong>Imagery unavailable here</strong>
+        <button type="button" data-tile-retry>Retry</button>
+        <button type="button" data-tile-dismiss aria-label="Dismiss imagery notice">×</button>
       </div>
     `;
     grid.appendChild(paneEl);
@@ -721,6 +641,12 @@ function enterQuadrantMode() {
       availabilityNotice: paneEl.querySelector('.quadrant-availability-notice'),
       tileState: { loaded: 0, errors: 0, requested: 0, settled: false }
     };
+    pane.availabilityNotice.querySelector('[data-tile-retry]').addEventListener('click', () => pane.tileState?.retry());
+    pane.availabilityNotice.querySelector('[data-tile-dismiss]').addEventListener('click', () => {
+      pane.tileState.dismissed = true;
+      updatePaneNotices(pane);
+    });
+    L.DomEvent.disableClickPropagation(pane.availabilityNotice);
     pane.select.addEventListener('change', event => setQuadrantLayer(pane, event.target.value));
     L.DomEvent.disableClickPropagation(paneEl.querySelector('.quadrant-select-wrap'));
     map.on('moveend zoomend', () => syncQuadrantMaps(map));
@@ -1424,7 +1350,6 @@ async function init() {
     app.layerDefs[def.id] = def;
     const layer = createHistoricLayer(def);
     app.historicLayers[def.id] = layer;
-    bindHistoricLayerState(layer, def);
   });
 
   // Restore state from the URL hash if present
@@ -1443,6 +1368,8 @@ async function init() {
     attributionControl: false
   });
 
+  manifest.layers.forEach(def => bindHistoricLayerState(app.historicLayers[def.id], def));
+
   L.control.attribution({ prefix: 'Leaflet' }).addTo(app.map);
   L.control.scale().addTo(app.map);
   createLayerControl().addTo(app.map);
@@ -1454,6 +1381,11 @@ async function init() {
   createSwipeDivider();
   setupGcpPicker();
 
+  document.getElementById('layer-status-dismiss').addEventListener('click', () => {
+    const state = app.historicLoadStates[app.currentLayerId];
+    if (state) state.dismissed = true;
+    updateActiveLayerStatus();
+  });
   const layerStatusRetry = document.getElementById('layer-status-retry');
   if (layerStatusRetry) layerStatusRetry.addEventListener('click', retryActiveHistoricLayer);
 
