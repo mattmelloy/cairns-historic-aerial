@@ -37,7 +37,7 @@
       "headers": [
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self' 'sha256-LhLteLDT8VOP6soo2l8Aas/J9Qs6tgz7ubdTiZLhcbg=' 'sha256-cCSJGQquP2byLZ3evYEm2mADGmdn5FlsKsu1uTn2ArI=' 'sha256-sctPQUglw86XjFSpraU+6ThkNvuf+DkbSMTo4BCzQTM='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' https://spatial-gis.information.qld.gov.au https://spatial-img.information.qld.gov.au; font-src 'self' data:; base-uri 'self'; frame-ancestors 'self'"
+          "value": "default-src 'self'; script-src 'self' 'sha256-LhLteLDT8VOP6soo2l8Aas/J9Qs6tgz7ubdTiZLhcbg=' 'sha256-cCSJGQquP2byLZ3evYEm2mADGmdn5FlsKsu1uTn2ArI=' 'sha256-220bH1SULvLUmi/Vnu7Z2/cTc4uxqDE5ywslQI2maec='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' https://spatial-gis.information.qld.gov.au https://spatial-img.information.qld.gov.au https://gis.environment.gov.au; font-src 'self' data:; base-uri 'self'; frame-ancestors 'self'"
         },
         {
           "key": "Cache-Control",

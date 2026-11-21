@@ -954,6 +954,30 @@ section h2, .section-label { display: block; margin: 0 0 8px; font-size: .875rem
 .surface-slope { background: linear-gradient(120deg, #e9ebce, #b7bd77 45%, #836241 77%, #584639); }
 .surface-national { background: repeating-linear-gradient(0deg, #a8c8bc 0 4px, #759e8e 5px 8px); }
 .surface-none { background: #e5ecdf; }
+.explore-links { display: flex; flex-wrap: wrap; column-gap: .8rem; margin-top: 7px; }
+.explore-links a { color: #22634d; font-size: .8125rem; line-height: 1.9; }
+.explore-legend {
+  position: absolute;
+  z-index: 610;
+  top: max(66px, calc(env(safe-area-inset-top) + 50px));
+  left: max(10px, env(safe-area-inset-left));
+  max-width: min(270px, calc(100% - 72px));
+  max-height: 38dvh;
+  overflow: auto;
+  border-radius: 8px;
+  padding: 7px 10px;
+  background: #fff;
+  box-shadow: var(--shadow);
+  font-size: .8rem;
+}
+.explore-legend summary { cursor: pointer; font-weight: 650; }
+.explore-legend ul { padding: 0; margin: 8px 0 0; list-style: none; }
+.explore-legend li { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+.explore-legend .symbol { width: 15px; height: 13px; }
+.explore-polygon { border: 1.5px solid var(--swatch); background: var(--fill, transparent); }
+.explore-point { background: var(--swatch); border: 1px solid #fff; transform: rotate(45deg) scale(.65); }
+.inspect .explore-result { margin: 6px 0; }
+.inspect .access-note { color: var(--muted); font-size: .75rem; }
 .overlayrow { min-height: 44px; display: flex; align-items: center; gap: 9px; cursor: pointer; font-size: .875rem; }
 .olname { flex: 1; }
 .olname small { display: block; color: var(--muted); font-size: .75rem; line-height: 1.35; margin-top: 2px; }
@@ -1004,6 +1028,10 @@ section h2, .section-label { display: block; margin: 0 0 8px; font-size: .875rem
         </button>
       </div>
     </div>
+    <details id="exploreLegend" class="explore-legend" hidden>
+      <summary>Land &amp; mining key</summary>
+      <ul id="exploreLegendItems"></ul>
+    </details>
     <div class="navtools" role="group" aria-label="Map navigation">
       <button id="zoomIn" aria-label="Zoom in" title="Zoom in">+</button>
       <button id="zoomOut" aria-label="Zoom out" title="Zoom out">−</button>
@@ -1035,6 +1063,16 @@ section h2, .section-label { display: block; margin: 0 0 8px; font-size: .875rem
         <h2 id="terrainTitle">Terrain</h2>
         <div id="surfaceOptions" class="surface-options" role="group" aria-labelledby="terrainTitle"></div>
         <p class="setting-hint">LiDAR grids are 0.5–1 m where available. Terrain elsewhere can use 30 m satellite data.</p>
+      </section>
+      <section aria-labelledby="exploreTitle">
+        <h2 id="exploreTitle">Land access &amp; mining history</h2>
+        <div id="exploreOverlays"></div>
+        <p class="setting-hint">Shading shows recorded tenure or designation. Check permission, signs and closures before entering. Stay clear of abandoned mine sites.</p>
+        <div class="explore-links">
+          <a href="https://parks.qld.gov.au/park-alerts" target="_blank" rel="noopener">Park alerts</a>
+          <a href="https://www.cairns.qld.gov.au/experience-cairns/parks-beaches-community-venues/parks-and-gardens" target="_blank" rel="noopener">Cairns council parks</a>
+          <a href="https://www.qld.gov.au/recreation/activities/areas-facilities/fossicking/designated-areas" target="_blank" rel="noopener">Fossicking rules and licences</a>
+        </div>
       </section>
       <section aria-labelledby="overlayTitle">
         <h2 id="overlayTitle">Reference overlays</h2>
@@ -1120,6 +1158,12 @@ const aerial = IMG + '/Basemaps/LatestStateProgram_AllUsers/ImageServer';
 const relief = GIS + '/Basemaps/QldMap_Relief/MapServer';
 const topo = GIS + '/Basemaps/QldMap_Topo/MapServer';
 const labels = GIS + '/Basemaps/QldImageryLabel/MapServer';
+const parks = GIS + '/Environment/ParksTerrestrialProtectedAreas/MapServer';
+const cadastre = GIS + '/PlanningCadastre/QSCF_LandParcelPropertyFramework/MapServer';
+const capad = 'https://gis.environment.gov.au/gispubmap/rest/services/ogc_services/CAPAD/MapServer';
+const mining = GIS + '/GeoscientificInformation/MiningResources/MapServer';
+const fossil = GIS + '/Boundaries/MiningAdministrativeAreas/MapServer';
+const heritage = GIS + '/Boundaries/AdminBoundariesFramework/MapServer';
 const stateLimits = L.latLngBounds([-30.0,137.4],[-9.0,154.6]);
 const places = [
   ['Cairns & Tablelands', -17.08, 145.66, 10, 'Regional view'],
@@ -1140,7 +1184,7 @@ const places = [
   ['Brisbane',-27.47,153.025,15,'South East Queensland']
 ];
 const map = L.map('map',{zoomControl:false,minZoom:5,maxZoom:20,maxBounds:stateLimits.pad(.35),preferCanvas:false}).setView([places[0][1],places[0][2]],10);
-for(const [name,z] of Object.entries({land:100,base:210,terrain:240,aerial:260,other:280,contours:300,projects:310,tiles:320,localNames:345,labels:350})){
+for(const [name,z] of Object.entries({land:100,base:210,terrain:240,aerial:260,other:280,contours:300,projects:310,tiles:320,landTenure:325,protectedLand:326,fossickingLand:327,miningHeritage:328,minePoints:354,localNames:345,labels:350})){
   const pane = map.createPane(name); pane.style.zIndex=z; pane.style.pointerEvents='none';
 }
 L.geoJSON(queenslandLand,{pane:'land',style:{color:'#98a99d',weight:1,fillColor:'#e0e6d8',fillOpacity:1},interactive:false}).addTo(map);
@@ -1169,6 +1213,13 @@ const sources=[
   ['Queensland topographic basemap',topo,'Queensland Government'],
   ['Queensland public aerial imagery',aerial,'State imagery program · satellite imagery fills coverage gaps'],
   ['Queensland imagery labels',labels,'Roads and place names · Queensland Government'],
+  ['Queensland parks and forests',parks+'/10','Queensland Parks and Wildlife Service estate'],
+  ['Queensland land tenure',cadastre+'/200','Queensland Spatial Cadastral Fabric · base parcels'],
+  ['Commonwealth protected areas',capad+'/0','DCCEEW · CAPAD 2024 terrestrial records'],
+  ['Historical mineral and quarry workings',mining+'/16','Geological Survey of Queensland · MINOCC'],
+  ['Historical coal workings',mining+'/102','Geological Survey of Queensland · coal resource records'],
+  ['Fossicking areas and general permissions',fossil,'Queensland Government · layers 11, 15 and 20'],
+  ['Queensland Heritage Register',heritage+'/78','State-listed places · mining and quarry names selected'],
   ['Reference coastline','https://github.com/rowanhogan/australian-states','Australian States GeoJSON · simplified Queensland outline']
 ];
 for(const [title,url,sub] of sources){
@@ -1302,6 +1353,143 @@ for(const [id,name,symbol,hint] of overlayChoices){
   row.innerHTML='<span aria-hidden="true" class="symbol '+symbol+'"></span><span class="olname">'+name+'<small id="hint-'+id+'">'+hint+'</small></span><input class="toggle" type="checkbox" aria-label="'+name+'">';
   const input=row.querySelector('input');input.checked=flags[id];input.onchange=()=>{flags[id]=input.checked;drawLayers();};$('overlays').append(row);
 }
+
+function polygonSymbol([r,g,b], alpha = 65) {
+  return {
+    type:'esriSFS', style:alpha ? 'esriSFSSolid' : 'esriSFSNull', color:[r,g,b,alpha],
+    outline:{type:'esriSLS',style:'esriSLSSolid',color:[r,g,b,240],width:1.15}
+  };
+}
+function pointSymbol([r,g,b]) {
+  return {
+    type:'esriSMS',style:'esriSMSDiamond',size:8,color:[r,g,b,255],
+    outline:{type:'esriSLS',style:'esriSLSSolid',color:[255,255,255,255],width:1}
+  };
+}
+const simpleRenderer = symbol => ({type:'simple',symbol});
+function uniqueRenderer(field1, defaultSymbol, groups) {
+  return {
+    type:'uniqueValue', field1, defaultSymbol,
+    uniqueValueInfos:groups.flatMap(({values,symbol}) => values.map(value => ({value,symbol})))
+  };
+}
+function mappedLayer(id, renderer, definitionExpression) {
+  return {id,source:{type:'mapLayer',mapLayerId:id},definitionExpression,drawingInfo:{renderer}};
+}
+const parkGreen = [25,109,57];
+const federalBlue = [26,104,165];
+const tenureRose = [164,62,75];
+const reserveTeal = [12,113,115];
+const fossickYellow = [171,110,4];
+const mineBrown = [152,58,23];
+const goldYellow = [213,150,18];
+const heritagePurple = [107,54,163];
+const mineSymbol = pointSymbol(mineBrown);
+const goldSymbol = pointSymbol(goldYellow);
+const heritageWords = ['MINE','MINES','MINING','GOLDFIELD','GOLDFIELDS','QUARRY','QUARRIES','COLLIERY','DIGGINGS','SMELTER','STATE BATTERY','STAMP BATTERY','ORE BATTERY'];
+const heritageFilter = heritageWords.flatMap(word => [`${word} %`, `% ${word} %`, `% ${word}`])
+  .map(pattern => `UPPER(placename) LIKE '${pattern}'`).join(' OR ');
+const exploreOverlays = [
+  {
+    id:'parks', title:'Queensland parks & forests', service:parks, pane:'protectedLand', minZoom:7,
+    layers:[mappedLayer(10,simpleRenderer(polygonSymbol(parkGreen)))],
+    key:[['State parks & forests',parkGreen,'polygon']],
+    hint:'National parks, conservation parks and state forests',
+    name:['estatename'], fields:[]
+  },
+  {
+    id:'commonwealth', title:'Commonwealth protected areas', service:capad, pane:'protectedLand', minZoom:7,
+    layers:[mappedLayer(0,simpleRenderer(polygonSymbol(federalBlue)),"EPBC = 'Commonwealth' AND ENVIRON = 'T'")],
+    key:[['Commonwealth protected land',federalBlue,'polygon']],
+    hint:'Terrestrial protected areas in CAPAD 2024',
+    name:['name'], fields:[['type']]
+  },
+  {
+    id:'tenure', title:'Land parcel tenure', service:cadastre, pane:'landTenure', minZoom:11,
+    layers:[mappedLayer(200,uniqueRenderer('tenure_code',null,[
+      {values:['FH','LL'],symbol:polygonSymbol(tenureRose,0)},
+      {values:['RE','SL'],symbol:polygonSymbol(reserveTeal,40)}
+    ]),"source = 'Lot' AND is_volumetric = 'No' AND tenure_code IN ('FH','LL','RE','SL')")],
+    key:[['Freehold or leasehold boundary',tenureRose,'outline'],['Reserve or state land',reserveTeal,'polygon']],
+    hint:'Freehold, leasehold, state land and reserves including some council-managed land',
+    name:['tenure'], fields:[['lotplan','Lot/plan: '],['feat_name']]
+  },
+  {
+    id:'fossicking', title:'Designated fossicking land', service:fossil, pane:'fossickingLand', minZoom:8,
+    layers:[11,15,20].map(id => mappedLayer(id,simpleRenderer(polygonSymbol(fossickYellow,75)),"status = 'Current'")),
+    key:[['Fossicking area or general permission area',fossickYellow,'polygon']],
+    hint:'Official areas and general permissions. A licence and site rules apply.',
+    name:['parcel_name'], fields:[['parcel_type']]
+  },
+  {
+    id:'workings', title:'Historical mine & quarry records', service:mining, pane:'minePoints', minZoom:8,
+    layers:[
+      mappedLayer(16,uniqueRenderer('main_commodity',mineSymbol,[{values:['GOLD'],symbol:goldSymbol}])),
+      mappedLayer(102,simpleRenderer(mineSymbol))
+    ],
+    key:[['Recorded gold working',goldYellow,'point'],['Other historical working',mineBrown,'point']],
+    hint:'Recorded gold, coal and other mineral workings, including some quarries',
+    name:['occur_name','site_locality'], fields:[['main_commodity'],['mine_status'],['group_name']]
+  },
+  {
+    id:'heritage', title:'Mining & quarry heritage', service:heritage, pane:'miningHeritage', minZoom:11,
+    layers:[mappedLayer(78,simpleRenderer(polygonSymbol(heritagePurple,42)),heritageFilter)],
+    key:[['State-listed mining heritage',heritagePurple,'polygon']],
+    hint:'Selected State Heritage Register boundaries matched by place name',
+    name:['placename'], fields:[['place_id','Heritage place no. ']]
+  }
+];
+
+function exploreSwatch([, colour, kind]) {
+  const swatch = document.createElement('span');
+  swatch.className = 'symbol ' + (kind === 'point' ? 'explore-point' : 'explore-polygon');
+  swatch.setAttribute('aria-hidden','true');
+  swatch.style.setProperty('--swatch', `rgb(${colour.join(',')})`);
+  if (kind === 'polygon') swatch.style.setProperty('--fill', `rgba(${colour.join(',')},.22)`);
+  return swatch;
+}
+for (const layer of exploreOverlays) {
+  layer.params = {dynamicLayers:JSON.stringify(layer.layers)};
+  const row = document.createElement('label');
+  row.className = 'overlayrow';
+  const text = document.createElement('span');
+  text.className = 'olname';
+  text.textContent = layer.title;
+  layer.description = document.createElement('small');
+  text.append(layer.description);
+  layer.toggle = document.createElement('input');
+  layer.toggle.type = 'checkbox';
+  layer.toggle.className = 'toggle';
+  layer.toggle.id = 'overlay-' + layer.id;
+  layer.toggle.onchange = drawLayers;
+  row.append(exploreSwatch(layer.key[0]), text, layer.toggle);
+  $('exploreOverlays').append(row);
+}
+
+const visibleExploreLayers = () => exploreOverlays.filter(layer => layer.toggle.checked && map.getZoom() >= layer.minZoom);
+function drawExploreLayers(zoom) {
+  const active = exploreOverlays.filter(layer => layer.toggle.checked);
+  const key = $('exploreLegend');
+  key.hidden = active.length === 0;
+  const items = $('exploreLegendItems');
+  items.replaceChildren();
+  for (const layer of exploreOverlays) {
+    const zoomHint = zoom < layer.minZoom ? `Zoom in to level ${layer.minZoom}. ` : '';
+    layer.description.textContent = zoomHint + layer.hint;
+    if (!layer.toggle.checked || zoom < layer.minZoom) {
+      clearSlot(layer.id);
+    } else {
+      drawImage(layer.id,layer.title,layer.service+'/export',layer.params,layer.pane);
+    }
+    if (!layer.toggle.checked) continue;
+    for (const entry of layer.key) {
+      const li = document.createElement('li');
+      li.append(exploreSwatch(entry),zoomHint + entry[0]);
+      items.append(li);
+    }
+  }
+}
+
 $('base').onchange = event => {
   base = event.target.value;
   baseLayer?.remove();
@@ -1386,6 +1574,7 @@ function drawLayers(){
   if(flags.projects)drawImage('projects','survey boundaries',survey+'/export',{dynamicLayers:outline(200,[170,89,16,255],true)},'projects');else clearSlot('projects');
   if(flags.tiles&&z>=15)drawImage('tiles','tile index',survey+'/export',{dynamicLayers:outline(100,[111,81,152,240],false)},'tiles');else clearSlot('tiles');
   if(flags.other)drawImage('other','other elevation footprints',survey+'/export',{dynamicLayers:outline(300,[46,127,143,255],false)},'other');else clearSlot('other');
+  drawExploreLayers(z);
   if(flags.labels&&!labelLayer)labelLayer=monitorTiles(tiled(labels,'labels',20),'labels','map labels').addTo(map);
   if(!flags.labels&&labelLayer){labelLayer.remove();labelLayer=null;}
   // Use local place names while the label service is loading or unavailable.
@@ -1484,14 +1673,68 @@ async function getJson(url,signal){
   const response=await fetch(url,{signal,credentials:'omit'});if(!response.ok)throw Error(response.status);
   const data=await response.json();if(data.error)throw Error(data.error.message);return data;
 }
+function exploreIdentifyUrl(layer, latlng) {
+  const bounds = map.getBounds();
+  const crs = map.options.crs;
+  const sw = crs.project(bounds.getSouthWest());
+  const ne = crs.project(bounds.getNorthEast());
+  const point = crs.project(latlng);
+  const size = map.getSize();
+  return requestUrl(layer.service+'/identify', {
+    ...layer.params, geometry:[point.x,point.y].join(','), geometryType:'esriGeometryPoint',
+    sr:3857, mapExtent:[sw.x,sw.y,ne.x,ne.y].join(','), imageDisplay:`${size.x},${size.y},96`,
+    tolerance:layer.id === 'workings' ? 10 : 0, layers:'all',
+    returnGeometry:false, returnFieldName:true, f:'json'
+  });
+}
+function exploreResultText(layer, result) {
+  const fields = Object.fromEntries(Object.entries(result.attributes ?? {}).map(([key,value]) => [key.toLowerCase(),value]));
+  const name = layer.name.map(key => fields[key]).find(Boolean) || result.value || result.layerName || layer.title;
+  const details = layer.fields.filter(([key]) => fields[key])
+    .map(([key,prefix = '']) => prefix + fields[key]);
+  return [name,...details].filter((value,index,all) => all.indexOf(value) === index).join(' · ');
+}
+async function inspectExploreLayer(layer, url, results, signal) {
+  try {
+    const response = await getJson(url,signal);
+    const entries = [...new Set(response.results.map(result => exploreResultText(layer,result)))];
+    if (!entries.length) {
+      results.textContent = 'No mapped record at this point.';
+      return;
+    }
+    const list = document.createElement('ul');
+    for (const entry of entries.slice(0,5)) list.append(make('li',entry));
+    results.replaceChildren(list);
+    if (entries.length > 5) results.append(`Showing 5 of ${entries.length} matches.`);
+  } catch {
+    const link = make('a','Open source lookup');
+    link.href = url;
+    link.target = '_blank';
+    link.rel = 'noopener';
+    results.replaceChildren('Lookup unavailable. ',link);
+  }
+}
 let previousQuery;
 map.on('click',e=>{
   previousQuery?.abort();const controller=new AbortController();previousQuery=controller;
   const {lat,lng}=e.latlng,point=JSON.stringify({x:lng,y:lat,spatialReference:{wkid:4326}});
+  const lookup = visibleExploreLayers().map(layer => ({layer,url:exploreIdentifyUrl(layer,e.latlng)}));
   const card=document.createElement('div');card.className='inspect';card.append(make('h3','Terrain inspection'));
   const position=make('div',coordinates(e.latlng));position.className='coord';card.append(position);
   const elevation=make('p','Reading elevation…'),projects=make('div','Checking survey coverage…');
   card.append(elevation,make('h4','Survey projects'),projects);
+  for (const item of lookup) {
+    const section = make('div','');
+    section.className = 'explore-result';
+    item.results = make('div','Looking up records…');
+    section.append(make('h4',item.layer.title),item.results);
+    card.append(section);
+  }
+  if (lookup.length) {
+    const note = make('p','Check access with the landholder or park manager. Stay clear of abandoned mines.');
+    note.className = 'access-note';
+    card.append(note);
+  }
   const popup=L.popup({maxWidth:Math.min(295,map.getSize().x-70),minWidth:180,autoPanPaddingTopLeft:[12,62],autoPanPaddingBottomRight:[12,40]}).setLatLng(e.latlng).setContent(card).openOn(map);
   const query=requestUrl(survey+'/200/query',{geometry:point,geometryType:'esriGeometryPoint',inSR:4326,spatialRel:'esriSpatialRelIntersects',outFields:'location,year',returnGeometry:false,where:'1=1',f:'json'});
   const identify=requestUrl(heightService+'/identify',{geometry:point,geometryType:'esriGeometryPoint',returnCatalogItems:false,returnGeometry:false,f:'json'});
@@ -1501,6 +1744,7 @@ map.on('click',e=>{
     getJson(identify,controller.signal).then(d=>{const val=d.value;const good=val!=null&&String(val).trim()!==''&&Number.isFinite(Number(val));elevation.textContent=good?'Ground model: '+Number(val).toLocaleString('en-AU',{maximumFractionDigits:1})+' m':'No elevation value at this point.';}).catch(()=>fallback(elevation,'Elevation unavailable.',identify)),
     getJson(query,controller.signal).then(d=>{projects.replaceChildren();const rows=(d.features||[]).map(f=>f.attributes).sort((a,b)=>b.year-a.year);if(!rows.length){projects.textContent='No indexed LiDAR survey at this point.';return;}const ul=document.createElement('ul');for(const row of rows){ul.append(make('li',row.location||String(row.year)));}projects.append(ul);}).catch(()=>fallback(projects,'Coverage lookup unavailable.',query))
   ];
+  tasks.push(...lookup.map(({layer,url,results}) => inspectExploreLayer(layer,url,results,controller.signal)));
   tasks.forEach(t=>t.finally(()=>{if(popup.isOpen())popup.update();}));
   Promise.allSettled(tasks).then(()=>clearTimeout(timer));
 });
