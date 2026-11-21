@@ -794,6 +794,22 @@ summary:focus-visible, a:focus-visible {
 }
 .navtools button + button { border-top: 1px solid var(--line); }
 .navtools button:focus-visible { outline-offset: -3px; }
+.navtools button[aria-busy="true"] { background: #edf4eb; cursor: progress; }
+.locate-icon {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+}
+.locate-icon::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  background: currentColor;
+  border-radius: 50%;
+}
 
 .mapnote {
   position: absolute;
@@ -992,6 +1008,9 @@ section h2, .section-label { display: block; margin: 0 0 8px; font-size: .875rem
       <button id="zoomIn" aria-label="Zoom in" title="Zoom in">+</button>
       <button id="zoomOut" aria-label="Zoom out" title="Zoom out">−</button>
       <button id="reset" aria-label="Return to Cairns and the Tablelands" title="Return to Cairns and the Tablelands">⌂</button>
+      <button id="locate" aria-label="Detect my location" title="Detect my location">
+        <span class="locate-icon" aria-hidden="true"></span>
+      </button>
     </div>
     <div class="mapnote" id="mapnote" role="status"></div>
     <div class="map-readout"><span id="coords"></span><span id="zoomText"></span></div>
@@ -1157,17 +1176,21 @@ for(const [title,url,sub] of sources){
   a.textContent=title;const detail=document.createElement('small');detail.textContent=sub;a.append(detail);$('sourceList').append(a);
 }
 const states=new Map();
+let locationNotice = '';
 function report(key,state){
   const previous = states.get(key);
   if (previous?.kind === state?.kind && previous?.title === state?.title) return;
   if(state) states.set(key,state); else states.delete(key);
+  renderStatus();
+}
+function renderStatus() {
   const errors=[...states.values()].filter(e=>e.kind==='error').map(e=>e.title);
   const waiting=[...states.values()].filter(e=>e.kind==='loading').map(e=>e.title);
-  const el=$('mapnote');el.replaceChildren();
+  const el=$('mapnote');el.replaceChildren(locationNotice);
   if(errors.length){
-    el.append('Unavailable: '+errors.join(', ')+'. ');
+    el.append((locationNotice ? ' ' : '')+'Unavailable: '+errors.join(', ')+'. ');
     const b=document.createElement('button');b.textContent='Retry';b.className='retry';b.onclick=retryLayers;el.append(b);
-  } else if(waiting.length) el.textContent='Loading '+waiting.join(', ')+'…';
+  } else if(waiting.length && !locationNotice) el.textContent='Loading '+waiting.join(', ')+'…';
 }
 function requestUrl(root,params){return root+'?'+new URLSearchParams(params);}
 const slots=new Map();
@@ -1385,8 +1408,60 @@ map.on('mousemove',e=>{$('coords').textContent=coordinates(e.latlng);});
 map.on('moveend resize',drawLayers);
 map.on('dragstart',()=>{$('placeLabel').textContent='Go to a place';});
 $('zoomIn').onclick=()=>map.zoomIn();$('zoomOut').onclick=()=>map.zoomOut();
+const locateButton = $('locate');
+let locationRequest = 0;
+let locationMarker;
+
+function setLocationNotice(message, pending = false) {
+  locateButton.setAttribute('aria-busy', String(pending));
+  locationNotice = message;
+  renderStatus();
+}
+
+locateButton.onclick = () => {
+  if (locateButton.getAttribute('aria-busy') === 'true') return;
+  if (!navigator.geolocation) {
+    setLocationNotice('Location is unavailable in this browser.');
+    return;
+  }
+
+  const request = ++locationRequest;
+  setLocationNotice('Finding your location…', true);
+  navigator.geolocation.getCurrentPosition(({coords}) => {
+    if (request !== locationRequest) return;
+    const point = L.latLng(coords.latitude, coords.longitude);
+    if (!stateLimits.contains(point)) {
+      setLocationNotice('Your location is outside this map’s coverage.');
+      return;
+    }
+
+    map.closePopup();
+    if (!locationMarker) {
+      locationMarker = L.circleMarker(point, {
+        radius: 7, color: '#fff', weight: 2, fillColor: '#155fb9',
+        fillOpacity: 1, interactive: false
+      }).addTo(map);
+    } else {
+      locationMarker.setLatLng(point);
+    }
+    $('placeLabel').textContent = 'Your location';
+    map.fitBounds(point.toBounds(Math.max(coords.accuracy, 30) * 2), {maxZoom: 17, animate: false});
+    setLocationNotice('');
+  }, error => {
+    if (request !== locationRequest) return;
+    const messages = {
+      1: 'Allow location access for this site, then try again.',
+      2: 'Your device could not find its location. Try again.',
+      3: 'Finding your location timed out. Try again.'
+    };
+    setLocationNotice(messages[error.code] || messages[2]);
+  }, {enableHighAccuracy: true, timeout: 12000, maximumAge: 30000});
+};
+
 function go(place){
   const [name,lat,lon,z]=place;
+  locationRequest++;
+  if (locationNotice) setLocationNotice('');
   $('placeLabel').textContent=name;map.closePopup();
   if(name==='Queensland'){map.fitBounds(stateLimits,{padding:[14,14],animate:false});}
   else map.setView([lat,lon],z,{animate:false});
