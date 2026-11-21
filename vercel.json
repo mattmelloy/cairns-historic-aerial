@@ -33,7 +33,7 @@
       ]
     },
     {
-      "source": "/lidar",
+      "source": "/(lidar/?)",
       "headers": [
         {
           "key": "Content-Security-Policy",
